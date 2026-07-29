@@ -19,7 +19,7 @@ app = Flask(__name__)
 
 @app.route("/")
 def home():
-  return "DKLR TV Bot Caption Bold Fixed!"
+  return "DKLR TV Bot HTML Formatting Fixed!"
 
 
 def run():
@@ -187,29 +187,36 @@ def match_show(caption):
   return None
 
 
-# 👇 कैप्शन को 100% Bold बनाने वाला क्लीनर फ़ंक्शन
-def build_bold_caption(raw_name):
+# 👇 HTML फ़ॉर्मेटिंग फ़ंक्शन (100% Perfect Bold without Star Bugs)
+def build_html_caption(raw_name):
   cleaned_name = raw_name.replace("TvShowHub", "DKLR_DR").replace(
       "tvshowhub", "DKLR_DR"
   )
-  cleaned_name = re.sub(r"\*+", "", cleaned_name).strip()  # पुराने स्टार हटाना
+  cleaned_name = (
+      cleaned_name.replace("*", "")
+      .replace("<", "&lt;")
+      .replace(">", "&gt;")
+      .strip()
+  )
 
   if not cleaned_name:
     cleaned_name = "Episode_Video.DKLR_DR.mp4"
 
   return (
-      f"**{cleaned_name}**\n\n"
-      "⚡️ **Join :-** [ **@DKLRDR** ]\n\n"
-      "📌 **Join:** https://t.me/+AT1UIPpK3c04MTk1\n\n"
-      "📌 **Upcoming New Episode -** https://t.me/+sN83w5txQO9hNTdl"
+      f"<b>{cleaned_name}</b>\n\n"
+      '⚡️ <b>Join :-</b> [ <b>@DKLRDR</b> ]\n\n'
+      '📌 <b>Join:</b> <a'
+      ' href="https://t.me/+AT1UIPpK3c04MTk1">https://t.me/+AT1UIPpK3c04MTk1</a>\n\n'
+      '📌 <b>Upcoming New Episode -</b> <a'
+      ' href="https://t.me/+sN83w5txQO9hNTdl">https://t.me/+sN83w5txQO9hNTdl</a>'
   )
 
 
 async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
   if update.message:
     await update.message.reply_text(
-        "**नमस्ते भाई! कृपया कोई तारीख लिखकर भेजें (जैसे: 24 July 2026)।**",
-        parse_mode="Markdown",
+        "<b>नमस्ते भाई! कृपया कोई तारीख लिखकर भेजें (जैसे: 24 July 2026)।</b>",
+        parse_mode="HTML",
     )
 
 
@@ -228,7 +235,7 @@ async def handle_video_upload(
     if not cleaned_name:
       cleaned_name = "Episode_Video.DKLR_DR.mp4"
 
-    final_caption = build_bold_caption(cleaned_name)
+    final_caption = build_html_caption(cleaned_name)
 
     if "pending_videos" not in context.user_data:
       context.user_data["pending_videos"] = []
@@ -242,9 +249,9 @@ async def handle_video_upload(
 
     total_rec = len(context.user_data["pending_videos"])
     await update.message.reply_text(
-        f"🎥 **वीडियो प्राप्त हो गई! (कुल: {total_rec})**\n\n"
-        "✍️ **कृपया तारीख लिखकर भेजें (जैसे: 20 July 2026):**",
-        parse_mode="Markdown",
+        f"🎥 <b>वीडियो प्राप्त हो गई! (कुल: {total_rec})</b>\n\n"
+        "✍️ <b>कृपया तारीख लिखकर भेजें (जैसे: 20 July 2026):</b>",
+        parse_mode="HTML",
     )
 
 
@@ -290,7 +297,7 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         ott_clean_name = detected_ott.split("_")[0].upper()
         if auto_title not in new_auto_shows:
-          new_auto_shows.append(f"• **{auto_title}** *({ott_clean_name})*")
+          new_auto_shows.append(f"• <b>{auto_title}</b> <i>({ott_clean_name})</i>")
 
       ex_list = existing_shows.get(matched_key, [])
       is_duplicate = any(v["id"] == vid["id"] for v in ex_list)
@@ -316,22 +323,22 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
             {"date": target_date}, {"$set": {"shows": existing_shows}}
         )
 
-    msg = f"✅ **तारीख सेट हो गई:** **{target_date.title()}**\n\n"
-    msg += f"🤖 **सफलतापूर्वक सेव हुए:** **{auto_saved} वीडियोस**\n"
+    msg = f"✅ <b>तारीख सेट हो गई:</b> <b>{target_date.title()}</b>\n\n"
+    msg += f"🤖 <b>सफलतापूर्वक सेव हुए:</b> <b>{auto_saved} वीडियोस</b>\n"
 
     if duplicate_count > 0:
       msg += (
-          f"⚠️ **डुप्लीकेट (पहले से मौजूद) छोड़े गए:** **{duplicate_count}"
-          " वीडियोस**\n"
+          f"⚠️ <b>डुप्लीकेट (पहले से मौजूद) छोड़े गए:</b> <b>{duplicate_count}"
+          " वीडियोस</b>\n"
       )
 
     if new_auto_shows:
-      msg += "\n🆕 **नए शोज़ ऑटो-पहचान कर ऐड किए गए:**\n"
+      msg += "\n🆕 <b>नए शोज़ ऑटो-पहचान कर ऐड किए गए:</b>\n"
       for ns in new_auto_shows:
         msg += f"{ns}\n"
 
-    msg += "\n🎉 **प्रोसेस पूरी हो गई है!**"
-    await update.message.reply_text(msg, parse_mode="Markdown")
+    msg += "\n🎉 <b>प्रोसेस पूरी हो गई है!</b>"
+    await update.message.reply_text(msg, parse_mode="HTML")
     return
 
   months = [
@@ -363,11 +370,11 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         [InlineKeyboardButton("❌ Close", callback_data="close")],
     ]
     await update.message.reply_text(
-        "✅ **Data fetched successfully!**\n\n"
-        f"📅 **Date Requested:**\n**{text.title()}**\n\n"
-        "🔍 **Please choose your desired OTT below:**",
+        "✅ <b>Data fetched successfully!</b>\n\n"
+        f"📅 <b>Date Requested:</b>\n<b>{text.title()}</b>\n\n"
+        "🔍 <b>Please choose your desired OTT below:</b>",
         reply_markup=InlineKeyboardMarkup(buttons),
-        parse_mode="Markdown",
+        parse_mode="HTML",
     )
 
 
@@ -402,15 +409,15 @@ async def button_click(update: Update, context: ContextTypes.DEFAULT_TYPE):
           InlineKeyboardButton("❌ Close", callback_data="close"),
       ])
       await query.message.edit_text(
-          f"🎬 **{data.split('_')[0].upper()} Shows**\n\n"
-          f"📅 **Chosen Date:** **{user_date.title()}**\n\n"
-          "🎯 **Choose a Show Below:**",
+          f"🎬 <b>{data.split('_')[0].upper()} Shows</b>\n\n"
+          f"📅 <b>Chosen Date:</b> <b>{user_date.title()}</b>\n\n"
+          "🎯 <b>Choose a Show Below:</b>",
           reply_markup=InlineKeyboardMarkup(show_buttons),
-          parse_mode="Markdown",
+          parse_mode="HTML",
       )
     else:
       await query.message.reply_text(
-          "❌ **No data found for that date.**", parse_mode="Markdown"
+          "❌ <b>No data found for that date.</b>", parse_mode="HTML"
       )
 
   elif data == "back_ott":
@@ -427,11 +434,11 @@ async def button_click(update: Update, context: ContextTypes.DEFAULT_TYPE):
         [InlineKeyboardButton("❌ Close", callback_data="close")],
     ]
     await query.message.edit_text(
-        "✅ **Data fetched successfully!**\n\n"
-        f"📅 **Date Requested:**\n**{user_date.title()}**\n\n"
-        "🔍 **Please choose your desired OTT below:**",
+        "✅ <b>Data fetched successfully!</b>\n\n"
+        f"📅 <b>Date Requested:</b>\n<b>{user_date.title()}</b>\n\n"
+        "🔍 <b>Please choose your desired OTT below:</b>",
         reply_markup=InlineKeyboardMarkup(buttons),
-        parse_mode="Markdown",
+        parse_mode="HTML",
     )
 
   elif data.startswith("show_"):
@@ -443,31 +450,30 @@ async def button_click(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if video_list:
       await query.message.delete()
       for vid_obj in video_list:
-        # ऑन-द-फ़्लाई कैप्शन क्लीनिंग ताकि पुराना खराब कैप्शन भी एकदम Bold बन जाए
         r_name = vid_obj.get(
             "raw_name", "Dr.Aarambhi.Season.1.Episode.116.mp4"
         )
-        fresh_caption = build_bold_caption(r_name)
+        fresh_caption = build_html_caption(r_name)
 
         await context.bot.send_video(
             chat_id=query.message.chat_id,
             video=vid_obj["id"],
             caption=fresh_caption,
-            parse_mode="Markdown",
+            parse_mode="HTML",  # 👈 HTML Mode for Perfect Bold
         )
 
       notice_text = (
-          "╭─────── ‼️ **Auto-Delete Notice** ‼️ ───────╮\n\n"
-          "🚨 **Make sure to save the video!**\n"
-          "⏰ **Videos Will Be Auto-deleted After 60 minutes to avoid copyright"
-          " issue** ⌛\n"
-          "📬 **Forward it to Saved Messages and Watch there**\n\n"
+          "╭─────── ‼️ <b>Auto-Delete Notice</b> ‼️ ───────╮\n\n"
+          "🚨 <b>Make sure to save the video!</b>\n"
+          "⏰ <b>Videos Will Be Auto-deleted After 60 minutes to avoid copyright"
+          " issue</b> ⌛\n"
+          "📬 <b>Forward it to Saved Messages and Watch there</b>\n\n"
           "╰────────────────────────────────────╯"
       )
       await context.bot.send_message(
           chat_id=query.message.chat_id,
           text=notice_text,
-          parse_mode="Markdown",
+          parse_mode="HTML",
       )
 
 
@@ -480,5 +486,5 @@ if __name__ == "__main__":
   )
   tg_app.add_handler(CallbackQueryHandler(button_click))
 
-  print("Clean Caption Fix Running...")
+  print("HTML Formatting Engine Active...")
   tg_app.run_polling()
