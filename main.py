@@ -1,4 +1,3 @@
-from datetime import datetime
 import os
 import re
 from threading import Thread
@@ -20,7 +19,7 @@ app = Flask(__name__)
 
 @app.route("/")
 def home():
-  return "DKLR TV Bot is Active with HS Tag Auto-Detection!"
+  return "DKLR TV Bot is Active with Duplicate Protection!"
 
 
 def run():
@@ -138,7 +137,19 @@ def detect_ott_tag(caption):
     return "dangal_p1"
   elif "SUNNXT" in text or ".SN." in text:
     return "sunnxt_p1"
-  return None
+  return "hotstar_p1"
+
+
+def extract_show_title_auto(raw_name):
+  clean = raw_name.replace("DKLR_DR", "").replace(".mp4", "").replace("_", " ")
+  parts = clean.split(".")
+  title_part = parts[0].strip()
+  title_part = re.sub(
+      r"(Season|Episode|Ep|\d+)", "", title_part, flags=re.IGNORECASE
+  ).strip()
+  if not title_part or len(title_part) < 3:
+    title_part = "Auto Show " + raw_name[:8]
+  return title_part.title()
 
 
 def match_show(caption):
@@ -225,74 +236,6 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
   text = update.message.text.strip()
 
-  if context.user_data.get("awaiting_new_show_name"):
-    show_name = text
-    context.user_data["temp_new_show_name"] = show_name
-    context.user_data["awaiting_new_show_name"] = False
-
-    detected_ott = context.user_data.get("detected_ott_for_new", None)
-
-    if detected_ott:
-      # OTT पहले से पता है (जैसे HS से Hotstar)
-      show_key = show_name.lower().replace(" ", "_")
-      shows_col.insert_one(
-          {"key": show_key, "name": show_name, "ott": detected_ott}
-      )
-
-      unmatched = context.user_data.get("unmatched_queue", [])
-      target_date = context.user_data.get("upload_target_date", "")
-
-      if unmatched and target_date:
-        vid = unmatched.pop(0)
-        doc = video_col.find_one({"date": target_date})
-        vid_obj = {"id": vid["id"], "caption": vid["caption"]}
-
-        if not doc:
-          video_col.insert_one(
-              {"date": target_date, "shows": {show_key: [vid_obj]}}
-          )
-        else:
-          existing_shows = doc.get("shows", {})
-          ex_list = existing_shows.get(show_key, [])
-          ex_list.append(vid_obj)
-          existing_shows[show_key] = ex_list
-          video_col.update_one(
-              {"date": target_date}, {"$set": {"shows": existing_shows}}
-          )
-
-        await update.message.reply_text(
-            "🎉 **सफलतापूर्वक परमानेंट सेव हो गया!**\n\n"
-            f"📺 **नया शो जोड़ा गया:** **{show_name}**\n"
-            f"📅 **तारीख:** **{target_date.title()}**\n\n"
-            "आगे से यह शो ऑटो-डिटेक्ट हो जाएगा! 🔥",
-            parse_mode="Markdown",
-        )
-    else:
-      buttons = [
-          [
-              InlineKeyboardButton(
-                  "Hotstar", callback_data="addott_hotstar_p1"
-              ),
-              InlineKeyboardButton("Zee5", callback_data="addott_zee5_p1"),
-          ],
-          [
-              InlineKeyboardButton(
-                  "DangalPlay", callback_data="addott_dangal_p1"
-              ),
-              InlineKeyboardButton(
-                  "SonyLiv", callback_data="addott_sonyliv_p1"
-              ),
-          ],
-          [InlineKeyboardButton("SunNXT", callback_data="addott_sunnxt_p1")],
-      ]
-      await update.message.reply_text(
-          f"📺 **शो का नाम:** **{show_name}**\n\n"
-          "**यह किस OTT प्लेटफार्म का शो है? चुनें:**",
-          reply_markup=InlineKeyboardMarkup(buttons),
-          parse_mode="Markdown",
-      )
-    return
-
   if context.user_data.get("awaiting_upload_date"):
     target_date = text.lower()
     context.user_data["awaiting_upload_date"] = False
@@ -301,60 +244,71 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data["pending_videos"] = []
 
     auto_saved = 0
-    unmatched = []
+    duplicate_count = 0
+    new_auto_shows = []
+
+    doc = video_col.find_one({"date": target_date})
+    existing_shows = doc.get("shows", {}) if doc else {}
 
     for vid in pending:
       matched_key = match_show(vid["raw_name"])
-      if matched_key:
-        doc = video_col.find_one({"date": target_date})
-        vid_obj = {"id": vid["id"], "caption": vid["caption"]}
 
-        if not doc:
-          video_col.insert_one(
-              {"date": target_date, "shows": {matched_key: [vid_obj]}}
-          )
-        else:
-          existing_shows = doc.get("shows", {})
-          ex_list = existing_shows.get(matched_key, [])
-          ex_list.append(vid_obj)
-          existing_shows[matched_key] = ex_list
-          video_col.update_one(
-              {"date": target_date}, {"$set": {"shows": existing_shows}}
-          )
-        auto_saved += 1
+      # अगर नया अनमैच्ड शो है ➔ ऑटो-ऐड
+      if not matched_key:
+        auto_title = extract_show_title_auto(vid["raw_name"])
+        matched_key = auto_title.lower().replace(" ", "_")
+        detected_ott = detect_ott_tag(vid["raw_name"])
+
+        shows_col.update_one(
+            {"key": matched_key},
+            {"$set": {"key": matched_key, "name": auto_title, "ott": detected_ott}},
+            upsert=True,
+        )
+
+        ott_clean_name = detected_ott.split("_")[0].upper()
+        if auto_title not in new_auto_shows:
+          new_auto_shows.append(f"• **{auto_title}** *({ott_clean_name})*")
+
+      # 🚫 डुप्लीकेट चेकिंग (अगर यह वीडियो फाइल पहले से इस शो में है तो सेव मत करो)
+      ex_list = existing_shows.get(matched_key, [])
+      is_duplicate = any(v["id"] == vid["id"] for v in ex_list)
+
+      if is_duplicate:
+        duplicate_count += 1
+        continue
+
+      vid_obj = {"id": vid["id"], "caption": vid["caption"]}
+      ex_list.append(vid_obj)
+      existing_shows[matched_key] = ex_list
+      auto_saved += 1
+
+    # MongoDB में अपडेट करें
+    if auto_saved > 0:
+      if not doc:
+        video_col.insert_one(
+            {"date": target_date, "shows": existing_shows}
+        )
       else:
-        unmatched.append(vid)
+        video_col.update_one(
+            {"date": target_date}, {"$set": {"shows": existing_shows}}
+        )
 
     msg = f"✅ **तारीख सेट हो गई:** **{target_date.title()}**\n\n"
-    msg += f"🤖 **ऑटो-मैच होकर सेव हुए:** **{auto_saved} वीडियोस**\n"
+    msg += f"🤖 **सफलतापूर्वक नए सेव हुए:** **{auto_saved} वीडियोस**\n"
 
-    if unmatched:
+    if duplicate_count > 0:
       msg += (
-          f"\n⚠️ **{len(unmatched)} वीडियो पहचान में नहीं आईं!**\nनीचे दिए बटन"
-          " से इन्हें परमानेंटली नए शो के साथ ऐड करें:"
+          f"⚠️ **डुप्लीकेट (पहले से मौजूद) छोड़ दिए गए:** **{duplicate_count}"
+          " वीडियोस**\n"
       )
-      context.user_data["unmatched_queue"] = unmatched
-      context.user_data["upload_target_date"] = target_date
 
-      # पहले अनमैच्ड वीडियो का OTT टैग चेक करें
-      first_unmatched = unmatched[0]
-      detected_ott = detect_ott_tag(first_unmatched["raw_name"])
-      context.user_data["detected_ott_for_new"] = detected_ott
+    if new_auto_shows:
+      msg += "\n🆕 **नए शोज़ ऑटो-पहचान कर ऐड किए गए:**\n"
+      for ns in new_auto_shows:
+        msg += f"{ns}\n"
 
-      buttons = [[
-          InlineKeyboardButton(
-              "➕ Add New Show & Save Video",
-              callback_data="start_add_new_show",
-          )
-      ]]
-      await update.message.reply_text(
-          msg,
-          reply_markup=InlineKeyboardMarkup(buttons),
-          parse_mode="Markdown",
-      )
-    else:
-      msg += "\n🎉 **सभी वीडियोस सफलतापूर्वक सही OTT और शोज़ में सेव हो गईं!**"
-      await update.message.reply_text(msg, parse_mode="Markdown")
+    msg += "\n🎉 **प्रोसेस पूरी हो गई है!**"
+    await update.message.reply_text(msg, parse_mode="Markdown")
     return
 
   months = [
@@ -404,51 +358,6 @@ async def button_click(update: Update, context: ContextTypes.DEFAULT_TYPE):
   if data == "close":
     await query.message.delete()
     return
-
-  elif data == "start_add_new_show":
-    context.user_data["awaiting_new_show_name"] = True
-    await query.message.reply_text(
-        "✍️ **कृपया नए शो का पूरा नाम टाइप करके भेजें:**\n*(उदाहरण: Superstar"
-        " Singer)*",
-        parse_mode="Markdown",
-    )
-    return
-
-  elif data.startswith("addott_"):
-    ott_code = data.replace("addott_", "")
-    show_name = context.user_data.get("temp_new_show_name", "")
-    show_key = show_name.lower().replace(" ", "_")
-
-    shows_col.insert_one({"key": show_key, "name": show_name, "ott": ott_code})
-
-    unmatched = context.user_data.get("unmatched_queue", [])
-    target_date = context.user_data.get("upload_target_date", "")
-
-    if unmatched and target_date:
-      vid = unmatched.pop(0)
-      doc = video_col.find_one({"date": target_date})
-      vid_obj = {"id": vid["id"], "caption": vid["caption"]}
-
-      if not doc:
-        video_col.insert_one(
-            {"date": target_date, "shows": {show_key: [vid_obj]}}
-        )
-      else:
-        existing_shows = doc.get("shows", {})
-        ex_list = existing_shows.get(show_key, [])
-        ex_list.append(vid_obj)
-        existing_shows[show_key] = ex_list
-        video_col.update_one(
-            {"date": target_date}, {"$set": {"shows": existing_shows}}
-        )
-
-      await query.message.reply_text(
-          "🎉 **सफलतापूर्वक परमानेंट सेव हो गया!**\n\n"
-          f"📺 **नया शो जोड़ा गया:** **{show_name}**\n"
-          f"📅 **तारीख:** **{target_date.title()}**\n\n"
-          "आगे से यह शो ऑटो-डिटेक्ट हो जाएगा! 🔥",
-          parse_mode="Markdown",
-      )
 
   elif data.startswith("ott_") or data.endswith("_p1"):
     all_shows = get_all_shows()
@@ -542,5 +451,5 @@ if __name__ == "__main__":
   )
   tg_app.add_handler(CallbackQueryHandler(button_click))
 
-  print("बॉट चालू है (Tag Detection Active)...")
+  print("Duplicates Filter & Full Auto Active...")
   tg_app.run_polling()
