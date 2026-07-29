@@ -19,7 +19,7 @@ app = Flask(__name__)
 
 @app.route("/")
 def home():
-  return "DKLR TV Bot Title Replacer Active!"
+  return "DKLR TV Bot Exact Caption Fixed!"
 
 
 def run():
@@ -201,7 +201,7 @@ def match_show(caption):
   return None
 
 
-# 👇 ओरिजिनल नाम में सिर्फ TvShowHub ➔ DKLRDR बदलकर पूरा 100% Exact Title दिखाने वाला फ़ंक्शन
+# 👇 100% Perfect Caption Builder (जो नाम दोगे वही 100% हूबहू सेव होगा)
 def build_html_caption(raw_name):
   cleaned_name = (
       raw_name.replace("TvShowHub", "DKLRDR")
@@ -242,13 +242,10 @@ async def handle_video_upload(
   if update.message and update.message.video:
     file_id = update.message.video.file_id
 
-    # ओरिजिनल फ़ाइल नेम / कैप्शन को लेना
+    # ओरिजिनल कैप्शन या फ़ाइल नेम पूरी तरह से लेना
     raw_name = (
         update.message.caption or update.message.video.file_name or ""
     )
-
-    if not raw_name:
-      raw_name = "Episode_Video.DKLRDR.mp4"
 
     if "pending_videos" not in context.user_data:
       context.user_data["pending_videos"] = []
@@ -494,5 +491,5 @@ if __name__ == "__main__":
   )
   tg_app.add_handler(CallbackQueryHandler(button_click))
 
-  print("Exact Video Title Engine Active...")
+  print("Exact Caption Storage Engine Active...")
   tg_app.run_polling()
