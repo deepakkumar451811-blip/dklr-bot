@@ -19,7 +19,7 @@ app = Flask(__name__)
 
 @app.route("/")
 def home():
-  return "DKLR TV Bot Exact Caption Fixed!"
+  return "DKLR TV Bot Active - Only Uploaded Shows Filtered!"
 
 
 def run():
@@ -48,6 +48,7 @@ shows_col = db["custom_shows"]
 
 # डिफॉल्ट शोज़ डेटाबेस
 DEFAULT_SHOWS = {
+    "binddii": {"name": "Binddii", "ott": "hotstar_p1"},
     "tu_hi_re": {"name": "Tu Hi Re Dil Mein", "ott": "zee5_p1"},
     "lakshmi_nivas": {"name": "Lakshmi Nivas", "ott": "zee5_p1"},
     "tumm_se_tumm": {"name": "Tumm Se Tumm Tak", "ott": "zee5_p1"},
@@ -149,15 +150,8 @@ def extract_show_title_auto(raw_name):
   )
   clean_text = clean.replace(".", " ").replace("_", " ")
 
-  if "thodi" in clean_text.lower() or "umeed" in clean_text.lower():
-    return "Thodi Si Umeed Thoda Sa Aasman"
-  elif "udne" in clean_text.lower() or "aasha" in clean_text.lower():
-    return "Udne Ki Aasha"
-  elif "aarambhi" in clean_text.lower():
-    return "Dr Aarambhi"
-
-  parts = clean.split(".")
-  title_part = parts[0].replace("_", " ").strip()
+  parts = clean_text.split()
+  title_part = parts[0] if parts else "Auto Show"
   title_part = re.sub(
       r"(Season|Episode|Ep|\d+)", "", title_part, flags=re.IGNORECASE
   ).strip()
@@ -167,14 +161,26 @@ def extract_show_title_auto(raw_name):
 
 
 def match_show(caption):
-  text = caption.lower().replace(".", " ").replace("_", " ")
+  variant_1 = caption.replace("_", " ").lower()
+  variant_2 = caption.replace(".", " ").lower()
+  variant_3 = caption.replace(".", " ").replace("_", " ").lower()
+  variant_4 = re.sub(r"\.mp4$", "", variant_3, flags=re.IGNORECASE).strip()
+
+  variants = [variant_1, variant_2, variant_3, variant_4]
   all_shows = get_all_shows()
 
   key_map = {
+      "binddii": "binddii",
+      "kyunki saas": "kyunki_saas",
+      "kyunki": "kyunki_saas",
+      "saas bhi": "kyunki_saas",
+      "bahu thi": "kyunki_saas",
+      "kyunki rishton": "kyunki_rishton",
       "thodi si umeed": "thodi_si_umeed",
       "thodi": "thodi_si_umeed",
       "umeed": "thodi_si_umeed",
       "udne ki": "udne_ki_aasha",
+      "udne": "udne_ki_aasha",
       "aasha": "udne_ki_aasha",
       "aarambhi": "aarambhi",
       "yrkkh": "yrkkh",
@@ -188,20 +194,20 @@ def match_show(caption):
       "lakshmi": "lakshmi_nivas",
   }
 
-  for k, s_key in key_map.items():
-    if k in text:
-      return s_key
+  for v in variants:
+    for k, s_key in key_map.items():
+      if k in v:
+        return s_key
 
-  for s_key, data in all_shows.items():
-    name_clean = data["name"].lower().replace("-", " ")
-    words = [w for w in name_clean.split() if len(w) > 3]
-    if any(w in text for w in words):
-      return s_key
+    for s_key, data in all_shows.items():
+      name_clean = data["name"].lower().replace("-", " ")
+      words = [w for w in name_clean.split() if len(w) > 3]
+      if any(w in v for w in words):
+        return s_key
 
   return None
 
 
-# 👇 100% Perfect Caption Builder (जो नाम दोगे वही 100% हूबहू सेव होगा)
 def build_html_caption(raw_name):
   cleaned_name = (
       raw_name.replace("TvShowHub", "DKLRDR")
@@ -241,8 +247,6 @@ async def handle_video_upload(
 ):
   if update.message and update.message.video:
     file_id = update.message.video.file_id
-
-    # ओरिजिनल कैप्शन या फ़ाइल नेम पूरी तरह से लेना
     raw_name = (
         update.message.caption or update.message.video.file_name or ""
     )
@@ -397,37 +401,6 @@ async def button_click(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await query.message.delete()
     return
 
-  elif data.startswith("ott_") or data.endswith("_p1"):
-    all_shows = get_all_shows()
-    doc = video_col.find_one({"date": user_date})
-    date_db = doc.get("shows", {}) if doc else {}
-
-    show_buttons = []
-    for key, info in all_shows.items():
-      if info["ott"] == data and key in date_db and len(date_db[key]) > 0:
-        show_buttons.append([
-            InlineKeyboardButton(
-                f"{info['name']} ↗️", callback_data=f"show_{key}"
-            )
-        ])
-
-    if show_buttons:
-      show_buttons.append([
-          InlineKeyboardButton("⬅️ Choose OTT", callback_data="back_ott"),
-          InlineKeyboardButton("❌ Close", callback_data="close"),
-      ])
-      await query.message.edit_text(
-          f"🎬 <b>{data.split('_')[0].upper()} Shows</b>\n\n"
-          f"📅 <b>Chosen Date:</b> <b>{user_date.title()}</b>\n\n"
-          "🎯 <b>Choose a Show Below:</b>",
-          reply_markup=InlineKeyboardMarkup(show_buttons),
-          parse_mode="HTML",
-      )
-    else:
-      await query.message.reply_text(
-          "❌ <b>No data found for that date.</b>", parse_mode="HTML"
-      )
-
   elif data == "back_ott":
     buttons = [
         [InlineKeyboardButton("SunNXT", callback_data="sunnxt_p1")],
@@ -441,13 +414,59 @@ async def button_click(update: Update, context: ContextTypes.DEFAULT_TYPE):
         [InlineKeyboardButton("SonyLiv", callback_data="sonyliv_p1")],
         [InlineKeyboardButton("❌ Close", callback_data="close")],
     ]
+    disp_date = user_date.title() if user_date else "Selected Date"
     await query.message.edit_text(
         "✅ <b>Data fetched successfully!</b>\n\n"
-        f"📅 <b>Date Requested:</b>\n<b>{text.title()}</b>\n\n"
+        f"📅 <b>Date Requested:</b>\n<b>{disp_date}</b>\n\n"
         "🔍 <b>Please choose your desired OTT below:</b>",
         reply_markup=InlineKeyboardMarkup(buttons),
         parse_mode="HTML",
     )
+
+  elif data.startswith("ott_") or data.endswith("_p1"):
+    all_shows = get_all_shows()
+    doc = video_col.find_one({"date": user_date})
+    date_db = doc.get("shows", {}) if doc else {}
+
+    show_buttons = []
+    # 👇 सिर्फ वही शोज़ दिखेंगे जिनकी वीडियो उस तारीख में डेटाबेस में अपलोड की गई है
+    for key, info in all_shows.items():
+      if info["ott"] == data and key in date_db and len(date_db[key]) > 0:
+        show_buttons.append([
+            InlineKeyboardButton(
+                f"{info['name']} ↗️", callback_data=f"show_{key}"
+            )
+        ])
+
+    disp_date = user_date.title() if user_date else "Selected Date"
+
+    if show_buttons:
+      show_buttons.append([
+          InlineKeyboardButton("⬅️ Choose OTT", callback_data="back_ott"),
+          InlineKeyboardButton("❌ Close", callback_data="close"),
+      ])
+      await query.message.edit_text(
+          f"🎬 <b>{data.split('_')[0].upper()} Shows</b>\n\n"
+          f"📅 <b>Chosen Date:</b> <b>{disp_date}</b>\n\n"
+          "🎯 <b>Choose a Show Below:</b>",
+          reply_markup=InlineKeyboardMarkup(show_buttons),
+          parse_mode="HTML",
+      )
+    else:
+      # अगर उस तारीख में इस OTT पर कोई वीडियो अपलोड नहीं हुई है
+      no_data_buttons = [
+          [
+              InlineKeyboardButton(
+                  "⬅️ Choose OTT", callback_data="back_ott"
+              ),
+              InlineKeyboardButton("❌ Close", callback_data="close"),
+          ]
+      ]
+      await query.message.edit_text(
+          f"❌ <b>तारीख ({disp_date}) में इस OTT पर कोई वीडियो अपलोड नहीं है!</b>",
+          reply_markup=InlineKeyboardMarkup(no_data_buttons),
+          parse_mode="HTML",
+      )
 
   elif data.startswith("show_"):
     show_key = data.replace("show_", "")
@@ -491,5 +510,5 @@ if __name__ == "__main__":
   )
   tg_app.add_handler(CallbackQueryHandler(button_click))
 
-  print("Exact Caption Storage Engine Active...")
+  print("Only Uploaded Shows Filter Active...")
   tg_app.run_polling()
