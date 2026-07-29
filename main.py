@@ -19,7 +19,7 @@ app = Flask(__name__)
 
 @app.route("/")
 def home():
-  return "DKLR TV Bot HTML Formatting Fixed!"
+  return "DKLR TV Bot Fixed Show Buttons Hide Issue!"
 
 
 def run():
@@ -187,7 +187,7 @@ def match_show(caption):
   return None
 
 
-# 👇 HTML फ़ॉर्मेटिंग फ़ंक्शन (100% Perfect Bold without Star Bugs)
+# 👇 HTML Bold formatting function
 def build_html_caption(raw_name):
   cleaned_name = raw_name.replace("TvShowHub", "DKLR_DR").replace(
       "tvshowhub", "DKLR_DR"
@@ -448,7 +448,8 @@ async def button_click(update: Update, context: ContextTypes.DEFAULT_TYPE):
     video_list = date_db.get(show_key, [])
 
     if video_list:
-      await query.message.delete()
+      # 👈 ध्यान दें: 'await query.message.delete()' को हटा दिया गया है ताकि बटन मेनू गायब/हाइड न हो!
+
       for vid_obj in video_list:
         r_name = vid_obj.get(
             "raw_name", "Dr.Aarambhi.Season.1.Episode.116.mp4"
@@ -459,7 +460,7 @@ async def button_click(update: Update, context: ContextTypes.DEFAULT_TYPE):
             chat_id=query.message.chat_id,
             video=vid_obj["id"],
             caption=fresh_caption,
-            parse_mode="HTML",  # 👈 HTML Mode for Perfect Bold
+            parse_mode="HTML",
         )
 
       notice_text = (
@@ -486,5 +487,5 @@ if __name__ == "__main__":
   )
   tg_app.add_handler(CallbackQueryHandler(button_click))
 
-  print("HTML Formatting Engine Active...")
+  print("Show Hide Issue Fixed Active...")
   tg_app.run_polling()
