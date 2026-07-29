@@ -19,7 +19,7 @@ app = Flask(__name__)
 
 @app.route("/")
 def home():
-  return "DKLR TV Bot Fixed Show Buttons Hide Issue!"
+  return "DKLR TV Bot Title Replacer Active!"
 
 
 def run():
@@ -142,13 +142,22 @@ def detect_ott_tag(caption):
 
 def extract_show_title_auto(raw_name):
   clean = (
-      raw_name.replace("DKLR_DR", "")
+      raw_name.replace("TvShowHub", "")
+      .replace("tvshowhub", "")
       .replace("DKLRDR", "")
-      .replace(".mp4", "")
-      .replace("_", " ")
+      .replace("DKLR_DR", "")
   )
+  clean_text = clean.replace(".", " ").replace("_", " ")
+
+  if "thodi" in clean_text.lower() or "umeed" in clean_text.lower():
+    return "Thodi Si Umeed Thoda Sa Aasman"
+  elif "udne" in clean_text.lower() or "aasha" in clean_text.lower():
+    return "Udne Ki Aasha"
+  elif "aarambhi" in clean_text.lower():
+    return "Dr Aarambhi"
+
   parts = clean.split(".")
-  title_part = parts[0].strip()
+  title_part = parts[0].replace("_", " ").strip()
   title_part = re.sub(
       r"(Season|Episode|Ep|\d+)", "", title_part, flags=re.IGNORECASE
   ).strip()
@@ -162,13 +171,18 @@ def match_show(caption):
   all_shows = get_all_shows()
 
   key_map = {
+      "thodi si umeed": "thodi_si_umeed",
+      "thodi": "thodi_si_umeed",
+      "umeed": "thodi_si_umeed",
+      "udne ki": "udne_ki_aasha",
+      "aasha": "udne_ki_aasha",
+      "aarambhi": "aarambhi",
       "yrkkh": "yrkkh",
       "yeh rishta": "yrkkh",
       "anupama": "anupama",
       "tmkoc": "tmkoc",
       "taarak": "tmkoc",
       "pushpa": "pushpa",
-      "udne ki": "udne_ki_aasha",
       "vasudha": "vasudha",
       "jagadhatri": "jagadhatri",
       "lakshmi": "lakshmi_nivas",
@@ -187,10 +201,12 @@ def match_show(caption):
   return None
 
 
-# 👇 HTML Bold formatting function
+# 👇 ओरिजिनल नाम में सिर्फ TvShowHub ➔ DKLRDR बदलकर पूरा 100% Exact Title दिखाने वाला फ़ंक्शन
 def build_html_caption(raw_name):
-  cleaned_name = raw_name.replace("TvShowHub", "DKLR_DR").replace(
-      "tvshowhub", "DKLR_DR"
+  cleaned_name = (
+      raw_name.replace("TvShowHub", "DKLRDR")
+      .replace("tvshowhub", "DKLRDR")
+      .replace("DKLR_DR", "DKLRDR")
   )
   cleaned_name = (
       cleaned_name.replace("*", "")
@@ -200,11 +216,11 @@ def build_html_caption(raw_name):
   )
 
   if not cleaned_name:
-    cleaned_name = "Episode_Video.DKLR_DR.mp4"
+    cleaned_name = "Episode_Video.DKLRDR.mp4"
 
   return (
       f"<b>{cleaned_name}</b>\n\n"
-      '⚡️ <b>Join :-</b> [ <b>@DKLRDR</b> ]\n\n'
+      "⚡️ <b>Join :-</b> [ <b>@DKLRDR</b> ]\n\n"
       '📌 <b>Join:</b> <a'
       ' href="https://t.me/+AT1UIPpK3c04MTk1">https://t.me/+AT1UIPpK3c04MTk1</a>\n\n'
       '📌 <b>Upcoming New Episode -</b> <a'
@@ -225,25 +241,21 @@ async def handle_video_upload(
 ):
   if update.message and update.message.video:
     file_id = update.message.video.file_id
+
+    # ओरिजिनल फ़ाइल नेम / कैप्शन को लेना
     raw_name = (
         update.message.caption or update.message.video.file_name or ""
     )
-    cleaned_name = raw_name.replace("TvShowHub", "DKLR_DR").replace(
-        "tvshowhub", "DKLR_DR"
-    )
 
-    if not cleaned_name:
-      cleaned_name = "Episode_Video.DKLR_DR.mp4"
-
-    final_caption = build_html_caption(cleaned_name)
+    if not raw_name:
+      raw_name = "Episode_Video.DKLRDR.mp4"
 
     if "pending_videos" not in context.user_data:
       context.user_data["pending_videos"] = []
 
     context.user_data["pending_videos"].append({
         "id": file_id,
-        "caption": final_caption,
-        "raw_name": cleaned_name,
+        "raw_name": raw_name,
     })
     context.user_data["awaiting_upload_date"] = True
 
@@ -308,7 +320,6 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
       vid_obj = {
           "id": vid["id"],
-          "caption": vid["caption"],
           "raw_name": vid["raw_name"],
       }
       ex_list.append(vid_obj)
@@ -435,7 +446,7 @@ async def button_click(update: Update, context: ContextTypes.DEFAULT_TYPE):
     ]
     await query.message.edit_text(
         "✅ <b>Data fetched successfully!</b>\n\n"
-        f"📅 <b>Date Requested:</b>\n<b>{user_date.title()}</b>\n\n"
+        f"📅 <b>Date Requested:</b>\n<b>{text.title()}</b>\n\n"
         "🔍 <b>Please choose your desired OTT below:</b>",
         reply_markup=InlineKeyboardMarkup(buttons),
         parse_mode="HTML",
@@ -448,12 +459,8 @@ async def button_click(update: Update, context: ContextTypes.DEFAULT_TYPE):
     video_list = date_db.get(show_key, [])
 
     if video_list:
-      # 👈 ध्यान दें: 'await query.message.delete()' को हटा दिया गया है ताकि बटन मेनू गायब/हाइड न हो!
-
       for vid_obj in video_list:
-        r_name = vid_obj.get(
-            "raw_name", "Dr.Aarambhi.Season.1.Episode.116.mp4"
-        )
+        r_name = vid_obj.get("raw_name", "Episode_Video.DKLRDR.mp4")
         fresh_caption = build_html_caption(r_name)
 
         await context.bot.send_video(
@@ -487,5 +494,5 @@ if __name__ == "__main__":
   )
   tg_app.add_handler(CallbackQueryHandler(button_click))
 
-  print("Show Hide Issue Fixed Active...")
+  print("Exact Video Title Engine Active...")
   tg_app.run_polling()
