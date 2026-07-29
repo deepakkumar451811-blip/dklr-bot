@@ -20,7 +20,7 @@ app = Flask(__name__)
 
 @app.route("/")
 def home():
-  return "DKLR TV Bot is Active with MongoDB!"
+  return "DKLR TV Bot is Active with HS Tag Auto-Detection!"
 
 
 def run():
@@ -45,369 +45,138 @@ MONGO_URI = os.environ.get(
 client = pymongo.MongoClient(MONGO_URI)
 db = client["dklr_bot_db"]
 video_col = db["videos"]
+shows_col = db["custom_shows"]
 
-SHOW_NAME_MAP = {
-    "tu_hi_re": "Tu Hi Re Dil Mein",
-    "lakshmi_nivas": "Lakshmi Nivas",
-    "tumm_se_tumm": "Tumm Se Tumm Tak",
-    "ganga_mai": "Ganga Mai Ki Betiyan",
-    "vasudha": "Vasudha",
-    "humari_radha": "Humari Radha",
-    "jagadhatri": "Jagadhatri",
-    "jaane_anjaane": "Jaane Anjaane Hum Mile",
-    "greatest_show": "The Greatest Show on Earth",
-    "pati_anaadi": "PATI ANAADI",
-    "pati_bhramachari": "PATI BHRAMACHARI",
-    "mann_atisundar": "MANN ATISUNDAR",
-    "rimjhim": "RIMJHIM",
-    "ishq_junooni": "ISHQ JUNOONI",
-    "tees_ke_paar": "TEES KE PAAR JAB MILA PYAR",
-    "kaisi_teri": "KAISI TERI DILLAGI",
-    "mann_sundar": "MANN SUNDAR",
-    "oh_humnava": "Oh Humnava - Tum Dena Saath Mera",
-    "bareilly": "Bareilly Ke Bacchan",
-    "juliet": "Tuu Juliet Jatt Di",
-    "mahadev": "Mahadev & Sons",
-    "juhi_mui": "Juhi Mui",
-    "do_duniya": "Do Duniya Ek Dil",
-    "parshuram": "Mr and Mrs Parshuram",
-    "anupama": "Anupama",
-    "yrkkh": "Yeh Rishta Kya Kehlata Hai",
-    "sairaab": "Sairaab",
-    "mannat": "Mannat - Har Khushi Paane Ki",
-    "seher": "Seher Hone Ko Hai",
-    "aarambhi": "Dr Aarambhi",
-    "udne_ki_aasha": "Udne Ki Aasha",
-    "kyunki_saas": "Kyunki Saas Bhi Kabhi Bahu Thi",
-    "kyunki_rishton": "Kyunki Rishton Ke Bhi Roop Badalte Hain",
-    "hui_gumm": "Hui Gumm Yaadein Ek Doctor Do Zindagiyaar",
-    "tmkoc": "Taarak Mehta Ka Ooltah Chashmah",
-    "hastinapur": "Hastinapur Ke Veer",
-    "tum_ho_naa": "Tum Ho Naa - Ghar Ki Superstar",
-    "pushpa": "Pushpa Impossible",
-    "thodi_si_umeed": "Thodi Si Umeed Thoda Sa Aasman",
-    "divya_prem": "Divya Prem",
+# डिफॉल्ट शोज़ डेटाबेस
+DEFAULT_SHOWS = {
+    "tu_hi_re": {"name": "Tu Hi Re Dil Mein", "ott": "zee5_p1"},
+    "lakshmi_nivas": {"name": "Lakshmi Nivas", "ott": "zee5_p1"},
+    "tumm_se_tumm": {"name": "Tumm Se Tumm Tak", "ott": "zee5_p1"},
+    "ganga_mai": {"name": "Ganga Mai Ki Betiyan", "ott": "zee5_p1"},
+    "vasudha": {"name": "Vasudha", "ott": "zee5_p1"},
+    "humari_radha": {"name": "Humari Radha", "ott": "zee5_p1"},
+    "jagadhatri": {"name": "Jagadhatri", "ott": "zee5_p1"},
+    "jaane_anjaane": {"name": "Jaane Anjaane Hum Mile", "ott": "zee5_p1"},
+    "greatest_show": {"name": "The Greatest Show on Earth", "ott": "zee5_p1"},
+    "pati_anaadi": {"name": "PATI ANAADI", "ott": "dangal_p1"},
+    "pati_bhramachari": {"name": "PATI BHRAMACHARI", "ott": "dangal_p1"},
+    "mann_atisundar": {"name": "MANN ATISUNDAR", "ott": "dangal_p1"},
+    "rimjhim": {"name": "RIMJHIM", "ott": "dangal_p1"},
+    "ishq_junooni": {"name": "ISHQ JUNOONI", "ott": "dangal_p1"},
+    "tees_ke_paar": {"name": "TEES KE PAAR JAB MILA PYAR", "ott": "dangal_p1"},
+    "kaisi_teri": {"name": "KAISI TERI DILLAGI", "ott": "dangal_p1"},
+    "mann_sundar": {"name": "MANN SUNDAR", "ott": "dangal_p1"},
+    "oh_humnava": {
+        "name": "Oh Humnava - Tum Dena Saath Mera",
+        "ott": "hotstar_p1",
+    },
+    "bareilly": {"name": "Bareilly Ke Bacchan", "ott": "hotstar_p1"},
+    "juliet": {"name": "Tuu Juliet Jatt Di", "ott": "hotstar_p1"},
+    "mahadev": {"name": "Mahadev & Sons", "ott": "hotstar_p1"},
+    "juhi_mui": {"name": "Juhi Mui", "ott": "hotstar_p1"},
+    "do_duniya": {"name": "Do Duniya Ek Dil", "ott": "hotstar_p1"},
+    "parshuram": {"name": "Mr and Mrs Parshuram", "ott": "hotstar_p1"},
+    "anupama": {"name": "Anupama", "ott": "hotstar_p1"},
+    "yrkkh": {"name": "Yeh Rishta Kya Kehlata Hai", "ott": "hotstar_p1"},
+    "sairaab": {"name": "Sairaab", "ott": "hotstar_p1"},
+    "mannat": {"name": "Mannat - Har Khushi Paane Ki", "ott": "hotstar_p1"},
+    "seher": {"name": "Seher Hone Ko Hai", "ott": "hotstar_p1"},
+    "aarambhi": {"name": "Dr Aarambhi", "ott": "hotstar_p1"},
+    "udne_ki_aasha": {"name": "Udne Ki Aasha", "ott": "hotstar_p1"},
+    "kyunki_saas": {
+        "name": "Kyunki Saas Bhi Kabhi Bahu Thi",
+        "ott": "hotstar_p1",
+    },
+    "kyunki_rishton": {
+        "name": "Kyunki Rishton Ke Bhi Roop Badalte Hain",
+        "ott": "hotstar_p1",
+    },
+    "hui_gumm": {
+        "name": "Hui Gumm Yaadein Ek Doctor Do Zindagiyaar",
+        "ott": "sonyliv_p1",
+    },
+    "tmkoc": {"name": "Taarak Mehta Ka Ooltah Chashmah", "ott": "sonyliv_p1"},
+    "hastinapur": {"name": "Hastinapur Ke Veer", "ott": "sonyliv_p1"},
+    "tum_ho_naa": {"name": "Tum Ho Naa - Ghar Ki Superstar", "ott": "sonyliv_p1"},
+    "pushpa": {"name": "Pushpa Impossible", "ott": "sonyliv_p1"},
+    "thodi_si_umeed": {
+        "name": "Thodi Si Umeed Thoda Sa Aasman",
+        "ott": "sunnxt_p1",
+    },
+    "divya_prem": {"name": "Divya Prem", "ott": "sunnxt_p1"},
 }
 
-OTT_SHOWS_MAP = {
-    "zee5_p1": [
-        "tu_hi_re",
-        "lakshmi_nivas",
-        "tumm_se_tumm",
-        "ganga_mai",
-        "vasudha",
-        "humari_radha",
-        "jagadhatri",
-        "jaane_anjaane",
-        "greatest_show",
-    ],
-    "dangal_p1": [
-        "pati_anaadi",
-        "pati_bhramachari",
-        "mann_atisundar",
-        "rimjhim",
-        "ishq_junooni",
-        "tees_ke_paar",
-        "kaisi_teri",
-        "mann_sundar",
-    ],
-    "hotstar_p1": [
-        "oh_humnava",
-        "bareilly",
-        "juliet",
-        "mahadev",
-        "juhi_mui",
-        "do_duniya",
-        "parshuram",
-        "anupama",
-        "yrkkh",
-        "sairaab",
-        "mannat",
-        "seher",
-        "aarambhi",
-        "udne_ki_aasha",
-        "kyunki_saas",
-        "kyunki_rishton",
-    ],
-    "sonyliv_p1": [
-        "hui_gumm",
-        "tmkoc",
-        "hastinapur",
-        "tum_ho_naa",
-        "pushpa",
-    ],
-    "sunnxt_p1": ["thodi_si_umeed", "divya_prem"],
-}
 
-UPLOAD_SHOWS = {
-    "up_zee5": [
-        [
-            InlineKeyboardButton(
-                "Tu Hi Re Dil Mein", callback_data="save_tu_hi_re"
-            )
-        ],
-        [
-            InlineKeyboardButton(
-                "Lakshmi Nivas", callback_data="save_lakshmi_nivas"
-            )
-        ],
-        [
-            InlineKeyboardButton(
-                "Tumm Se Tumm Tak", callback_data="save_tumm_se_tumm"
-            )
-        ],
-        [
-            InlineKeyboardButton(
-                "Ganga Mai Ki Betiyan", callback_data="save_ganga_mai"
-            )
-        ],
-        [InlineKeyboardButton("Vasudha", callback_data="save_vasudha")],
-        [
-            InlineKeyboardButton(
-                "Humari Radha", callback_data="save_humari_radha"
-            )
-        ],
-        [InlineKeyboardButton("Jagadhatri", callback_data="save_jagadhatri")],
-        [
-            InlineKeyboardButton(
-                "Jaane Anjaane Hum Mile", callback_data="save_jaane_anjaane"
-            )
-        ],
-        [
-            InlineKeyboardButton(
-                "The Greatest Show on Earth", callback_data="save_greatest_show"
-            )
-        ],
-    ],
-    "up_dangal": [
-        [
-            InlineKeyboardButton(
-                "PATI ANAADI", callback_data="save_pati_anaadi"
-            )
-        ],
-        [
-            InlineKeyboardButton(
-                "PATI BHRAMACHARI", callback_data="save_pati_bhramachari"
-            )
-        ],
-        [
-            InlineKeyboardButton(
-                "MANN ATISUNDAR", callback_data="save_mann_atisundar"
-            )
-        ],
-        [InlineKeyboardButton("RIMJHIM", callback_data="save_rimjhim")],
-        [
-            InlineKeyboardButton(
-                "ISHQ JUNOONI", callback_data="save_ishq_junooni"
-            )
-        ],
-        [
-            InlineKeyboardButton(
-                "TEES KE PAAR JAB MILA PYAR", callback_data="save_tees_ke_paar"
-            )
-        ],
-        [
-            InlineKeyboardButton(
-                "KAISI TERI DILLAGI", callback_data="save_kaisi_teri"
-            )
-        ],
-        [
-            InlineKeyboardButton(
-                "MANN SUNDAR", callback_data="save_mann_sundar"
-            )
-        ],
-    ],
-    "up_hotstar": [
-        [
-            InlineKeyboardButton(
-                "Oh Humnava - Tum Dena Saath Mera",
-                callback_data="save_oh_humnava",
-            )
-        ],
-        [
-            InlineKeyboardButton(
-                "Bareilly Ke Bacchan", callback_data="save_bareilly"
-            )
-        ],
-        [
-            InlineKeyboardButton(
-                "Tuu Juliet Jatt Di", callback_data="save_juliet"
-            )
-        ],
-        [
-            InlineKeyboardButton(
-                "Mahadev & Sons", callback_data="save_mahadev"
-            )
-        ],
-        [InlineKeyboardButton("Juhi Mui", callback_data="save_juhi_mui")],
-        [
-            InlineKeyboardButton(
-                "Do Duniya Ek Dil", callback_data="save_do_duniya"
-            )
-        ],
-        [
-            InlineKeyboardButton(
-                "Mr and Mrs Parshuram", callback_data="save_parshuram"
-            )
-        ],
-        [InlineKeyboardButton("Anupama", callback_data="save_anupama")],
-        [
-            InlineKeyboardButton(
-                "Yeh Rishta Kya Kehlata Hai", callback_data="save_yrkkh"
-            )
-        ],
-        [InlineKeyboardButton("Sairaab", callback_data="save_sairaab")],
-        [
-            InlineKeyboardButton(
-                "Mannat - Har Khushi Paane Ki", callback_data="save_mannat"
-            )
-        ],
-        [
-            InlineKeyboardButton(
-                "Seher Hone Ko Hai", callback_data="save_seher"
-            )
-        ],
-        [InlineKeyboardButton("Dr Aarambhi", callback_data="save_aarambhi")],
-        [
-            InlineKeyboardButton(
-                "Udne Ki Aasha", callback_data="save_udne_ki_aasha"
-            )
-        ],
-        [
-            InlineKeyboardButton(
-                "Kyunki Saas Bhi Kabhi Bahu Thi", callback_data="save_kyunki_saas"
-            )
-        ],
-        [
-            InlineKeyboardButton(
-                "Kyunki Rishton Ke Bhi Roop Badalte Hain",
-                callback_data="save_kyunki_rishton",
-            )
-        ],
-    ],
-    "up_sonyliv": [
-        [
-            InlineKeyboardButton(
-                "Hui Gumm Yaadein", callback_data="save_hui_gumm"
-            )
-        ],
-        [InlineKeyboardButton("TMKOC", callback_data="save_tmkoc")],
-        [
-            InlineKeyboardButton(
-                "Hastinapur Ke Veer", callback_data="save_hastinapur"
-            )
-        ],
-        [
-            InlineKeyboardButton(
-                "Tum Ho Naa", callback_data="save_tum_ho_naa"
-            )
-        ],
-        [
-            InlineKeyboardButton(
-                "Pushpa Impossible", callback_data="save_pushpa"
-            )
-        ],
-    ],
-    "up_sunnxt": [
-        [
-            InlineKeyboardButton(
-                "Thodi Si Umeed Thoda Sa Aasman",
-                callback_data="save_thodi_si_umeed",
-            )
-        ],
-        [InlineKeyboardButton("Divya Prem", callback_data="save_divya_prem")],
-    ],
-}
+def get_all_shows():
+  shows = DEFAULT_SHOWS.copy()
+  customs = shows_col.find()
+  for c in customs:
+    shows[c["key"]] = {"name": c["name"], "ott": c["ott"]}
+  return shows
+
+
+def detect_ott_tag(caption):
+  text = caption.upper()
+  if ".HS." in text or " HS " in text or "HOTSTAR" in text or "HS.WEB" in text:
+    return "hotstar_p1"
+  elif (
+      ".Z5." in text
+      or " Z5 " in text
+      or "ZEE5" in text
+      or ".ZEE." in text
+      or "ZEE" in text
+  ):
+    return "zee5_p1"
+  elif ".SL." in text or " SONY " in text or "SONYLIV" in text or ".SL " in text:
+    return "sonyliv_p1"
+  elif (
+      ".DP." in text
+      or " DANGAL " in text
+      or "DANGALPLAY" in text
+      or "DANGAL" in text
+  ):
+    return "dangal_p1"
+  elif "SUNNXT" in text or ".SN." in text:
+    return "sunnxt_p1"
+  return None
+
+
+def match_show(caption):
+  text = caption.lower().replace(".", " ").replace("_", " ")
+  all_shows = get_all_shows()
+
+  key_map = {
+      "yrkkh": "yrkkh",
+      "yeh rishta": "yrkkh",
+      "anupama": "anupama",
+      "tmkoc": "tmkoc",
+      "taarak": "tmkoc",
+      "pushpa": "pushpa",
+      "udne ki": "udne_ki_aasha",
+      "vasudha": "vasudha",
+      "jagadhatri": "jagadhatri",
+      "lakshmi": "lakshmi_nivas",
+  }
+
+  for k, s_key in key_map.items():
+    if k in text:
+      return s_key
+
+  for s_key, data in all_shows.items():
+    name_clean = data["name"].lower().replace("-", " ")
+    words = [w for w in name_clean.split() if len(w) > 3]
+    if any(w in text for w in words):
+      return s_key
+
+  return None
 
 
 async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
   if update.message:
     await update.message.reply_text(
-        "नमस्ते भाई! कृपया कोई तारीख लिखकर भेजें (जैसे: 24 July 2026)।"
-    )
-
-
-async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
-  if not update.message or not update.message.text:
-    return
-
-  text = update.message.text.strip()
-
-  if context.user_data.get("awaiting_upload_date"):
-    context.user_data["upload_target_date"] = text.lower()
-    context.user_data["awaiting_upload_date"] = False
-
-    buttons = [
-        [InlineKeyboardButton("Hotstar Shows", callback_data="up_hotstar")],
-        [InlineKeyboardButton("Zee5 Shows", callback_data="up_zee5")],
-        [InlineKeyboardButton("DangalPlay Shows", callback_data="up_dangal")],
-        [InlineKeyboardButton("SonyLiv Shows", callback_data="up_sonyliv")],
-        [InlineKeyboardButton("SunNXT Shows", callback_data="up_sunnxt")],
-    ]
-
-    await update.message.reply_text(
-        f"📅 तारीख सेट हो गई: {text.title()}\n\n"
-        "अब यह वीडियो किस OTT Platform के शो की है, चुनें:",
-        reply_markup=InlineKeyboardMarkup(buttons),
+        "**नमस्ते भाई! कृपया कोई तारीख लिखकर भेजें (जैसे: 24 July 2026)।**",
         parse_mode="Markdown",
     )
-    return
-
-  months = [
-      "january",
-      "february",
-      "march",
-      "april",
-      "may",
-      "june",
-      "july",
-      "august",
-      "september",
-      "october",
-      "november",
-      "december",
-  ]
-  has_valid_month = any(m in text.lower() for m in months)
-  has_digits = bool(re.search(r"\d+", text))
-
-  if not (has_valid_month and has_digits):
-    error_msg = (
-        "❌ अमान्य तारीख (Invalid Date)!\n\n"
-        "कृपया सही फॉर्मेट में तारीख लिखकर भेजें।\n\n"
-        "💡 उदाहरण (Example):\n"
-        "• 20 July 2026\n"
-        "• 24 July 2026\n"
-    )
-    await update.message.reply_text(error_msg, parse_mode="Markdown")
-    return
-
-  context.user_data["selected_date"] = text.lower()
-
-  response_text = (
-      "✅ Data fetched successfully!\n\n"
-      f"📅 Date Requested:\n{text.title()}\n\n"
-      "📦 Available OTTs in Database:\n5 OTTs found\n\n"
-      "🔍 Please choose your desired OTT below:"
-  )
-
-  buttons = [
-      [InlineKeyboardButton("SunNXT", callback_data="sunnxt_p1")],
-      [InlineKeyboardButton("Zee5", callback_data="zee5_p1")],
-      [InlineKeyboardButton("DangalPlay", callback_data="dangal_p1")],
-      [
-          InlineKeyboardButton(
-              "Hotstar(StarPlus & Colors)", callback_data="hotstar_p1"
-          )
-      ],
-      [InlineKeyboardButton("SonyLiv", callback_data="sonyliv_p1")],
-      [InlineKeyboardButton("❌ Close", callback_data="close")],
-  ]
-
-  await update.message.reply_text(
-      response_text,
-      parse_mode="Markdown",
-      reply_markup=InlineKeyboardMarkup(buttons),
-  )
 
 
 async def handle_video_upload(
@@ -426,25 +195,201 @@ async def handle_video_upload(
       cleaned_name = "Episode_Video.DKLR_DR.mp4"
 
     final_caption = (
-        f"{cleaned_name}\n\n"
-        "⚡️Join :- [ @DKLR_DR ]\n\n"
-        "📌 Join: https://t.me/+AT1UIPpK3c04MTk1\n\n"
-        "📌 Upcoming New Episode - https://t.me/+sN83w5txQO9hNTdl"
+        f"**{cleaned_name}**\n\n"
+        "⚡️**Join :-** [ **@DKLR_DR** ]\n\n"
+        "📌 **Join:** https://t.me/+AT1UIPpK3c04MTk1\n\n"
+        "📌 **Upcoming New Episode -** https://t.me/+sN83w5txQO9hNTdl"
     )
 
     if "pending_videos" not in context.user_data:
       context.user_data["pending_videos"] = []
 
-    context.user_data["pending_videos"].append(
-        {"id": file_id, "caption": final_caption}
-    )
+    context.user_data["pending_videos"].append({
+        "id": file_id,
+        "caption": final_caption,
+        "raw_name": cleaned_name,
+    })
     context.user_data["awaiting_upload_date"] = True
 
     total_rec = len(context.user_data["pending_videos"])
     await update.message.reply_text(
-        f"🎥 वीडियो प्राप्त हो गई! (कुल: {total_rec})\n\n"
-        "✍️ कृपया वह तारीख (Date) लिखकर भेजें जिस तारीख का यह एपिसोड है:\n"
-        "*(उदाहरण: 20 July 2026)*",
+        f"🎥 **वीडियो प्राप्त हो गई! (कुल: {total_rec})**\n\n"
+        "✍️ **कृपया तारीख लिखकर भेजें (जैसे: 20 July 2026):**",
+        parse_mode="Markdown",
+    )
+
+
+async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
+  if not update.message or not update.message.text:
+    return
+
+  text = update.message.text.strip()
+
+  if context.user_data.get("awaiting_new_show_name"):
+    show_name = text
+    context.user_data["temp_new_show_name"] = show_name
+    context.user_data["awaiting_new_show_name"] = False
+
+    detected_ott = context.user_data.get("detected_ott_for_new", None)
+
+    if detected_ott:
+      # OTT पहले से पता है (जैसे HS से Hotstar)
+      show_key = show_name.lower().replace(" ", "_")
+      shows_col.insert_one(
+          {"key": show_key, "name": show_name, "ott": detected_ott}
+      )
+
+      unmatched = context.user_data.get("unmatched_queue", [])
+      target_date = context.user_data.get("upload_target_date", "")
+
+      if unmatched and target_date:
+        vid = unmatched.pop(0)
+        doc = video_col.find_one({"date": target_date})
+        vid_obj = {"id": vid["id"], "caption": vid["caption"]}
+
+        if not doc:
+          video_col.insert_one(
+              {"date": target_date, "shows": {show_key: [vid_obj]}}
+          )
+        else:
+          existing_shows = doc.get("shows", {})
+          ex_list = existing_shows.get(show_key, [])
+          ex_list.append(vid_obj)
+          existing_shows[show_key] = ex_list
+          video_col.update_one(
+              {"date": target_date}, {"$set": {"shows": existing_shows}}
+          )
+
+        await update.message.reply_text(
+            "🎉 **सफलतापूर्वक परमानेंट सेव हो गया!**\n\n"
+            f"📺 **नया शो जोड़ा गया:** **{show_name}**\n"
+            f"📅 **तारीख:** **{target_date.title()}**\n\n"
+            "आगे से यह शो ऑटो-डिटेक्ट हो जाएगा! 🔥",
+            parse_mode="Markdown",
+        )
+    else:
+      buttons = [
+          [
+              InlineKeyboardButton(
+                  "Hotstar", callback_data="addott_hotstar_p1"
+              ),
+              InlineKeyboardButton("Zee5", callback_data="addott_zee5_p1"),
+          ],
+          [
+              InlineKeyboardButton(
+                  "DangalPlay", callback_data="addott_dangal_p1"
+              ),
+              InlineKeyboardButton(
+                  "SonyLiv", callback_data="addott_sonyliv_p1"
+              ),
+          ],
+          [InlineKeyboardButton("SunNXT", callback_data="addott_sunnxt_p1")],
+      ]
+      await update.message.reply_text(
+          f"📺 **शो का नाम:** **{show_name}**\n\n"
+          "**यह किस OTT प्लेटफार्म का शो है? चुनें:**",
+          reply_markup=InlineKeyboardMarkup(buttons),
+          parse_mode="Markdown",
+      )
+    return
+
+  if context.user_data.get("awaiting_upload_date"):
+    target_date = text.lower()
+    context.user_data["awaiting_upload_date"] = False
+
+    pending = context.user_data.get("pending_videos", [])
+    context.user_data["pending_videos"] = []
+
+    auto_saved = 0
+    unmatched = []
+
+    for vid in pending:
+      matched_key = match_show(vid["raw_name"])
+      if matched_key:
+        doc = video_col.find_one({"date": target_date})
+        vid_obj = {"id": vid["id"], "caption": vid["caption"]}
+
+        if not doc:
+          video_col.insert_one(
+              {"date": target_date, "shows": {matched_key: [vid_obj]}}
+          )
+        else:
+          existing_shows = doc.get("shows", {})
+          ex_list = existing_shows.get(matched_key, [])
+          ex_list.append(vid_obj)
+          existing_shows[matched_key] = ex_list
+          video_col.update_one(
+              {"date": target_date}, {"$set": {"shows": existing_shows}}
+          )
+        auto_saved += 1
+      else:
+        unmatched.append(vid)
+
+    msg = f"✅ **तारीख सेट हो गई:** **{target_date.title()}**\n\n"
+    msg += f"🤖 **ऑटो-मैच होकर सेव हुए:** **{auto_saved} वीडियोस**\n"
+
+    if unmatched:
+      msg += (
+          f"\n⚠️ **{len(unmatched)} वीडियो पहचान में नहीं आईं!**\nनीचे दिए बटन"
+          " से इन्हें परमानेंटली नए शो के साथ ऐड करें:"
+      )
+      context.user_data["unmatched_queue"] = unmatched
+      context.user_data["upload_target_date"] = target_date
+
+      # पहले अनमैच्ड वीडियो का OTT टैग चेक करें
+      first_unmatched = unmatched[0]
+      detected_ott = detect_ott_tag(first_unmatched["raw_name"])
+      context.user_data["detected_ott_for_new"] = detected_ott
+
+      buttons = [[
+          InlineKeyboardButton(
+              "➕ Add New Show & Save Video",
+              callback_data="start_add_new_show",
+          )
+      ]]
+      await update.message.reply_text(
+          msg,
+          reply_markup=InlineKeyboardMarkup(buttons),
+          parse_mode="Markdown",
+      )
+    else:
+      msg += "\n🎉 **सभी वीडियोस सफलतापूर्वक सही OTT और शोज़ में सेव हो गईं!**"
+      await update.message.reply_text(msg, parse_mode="Markdown")
+    return
+
+  months = [
+      "january",
+      "february",
+      "march",
+      "april",
+      "may",
+      "june",
+      "july",
+      "august",
+      "september",
+      "october",
+      "november",
+      "december",
+  ]
+  if any(m in text.lower() for m in months) and re.search(r"\d+", text):
+    context.user_data["selected_date"] = text.lower()
+    buttons = [
+        [InlineKeyboardButton("SunNXT", callback_data="sunnxt_p1")],
+        [InlineKeyboardButton("Zee5", callback_data="zee5_p1")],
+        [InlineKeyboardButton("DangalPlay", callback_data="dangal_p1")],
+        [
+            InlineKeyboardButton(
+                "Hotstar(StarPlus & Colors)", callback_data="hotstar_p1"
+            )
+        ],
+        [InlineKeyboardButton("SonyLiv", callback_data="sonyliv_p1")],
+        [InlineKeyboardButton("❌ Close", callback_data="close")],
+    ]
+    await update.message.reply_text(
+        "✅ **Data fetched successfully!**\n\n"
+        f"📅 **Date Requested:**\n**{text.title()}**\n\n"
+        "🔍 **Please choose your desired OTT below:**",
+        reply_markup=InlineKeyboardMarkup(buttons),
         parse_mode="Markdown",
     )
 
@@ -460,6 +405,82 @@ async def button_click(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await query.message.delete()
     return
 
+  elif data == "start_add_new_show":
+    context.user_data["awaiting_new_show_name"] = True
+    await query.message.reply_text(
+        "✍️ **कृपया नए शो का पूरा नाम टाइप करके भेजें:**\n*(उदाहरण: Superstar"
+        " Singer)*",
+        parse_mode="Markdown",
+    )
+    return
+
+  elif data.startswith("addott_"):
+    ott_code = data.replace("addott_", "")
+    show_name = context.user_data.get("temp_new_show_name", "")
+    show_key = show_name.lower().replace(" ", "_")
+
+    shows_col.insert_one({"key": show_key, "name": show_name, "ott": ott_code})
+
+    unmatched = context.user_data.get("unmatched_queue", [])
+    target_date = context.user_data.get("upload_target_date", "")
+
+    if unmatched and target_date:
+      vid = unmatched.pop(0)
+      doc = video_col.find_one({"date": target_date})
+      vid_obj = {"id": vid["id"], "caption": vid["caption"]}
+
+      if not doc:
+        video_col.insert_one(
+            {"date": target_date, "shows": {show_key: [vid_obj]}}
+        )
+      else:
+        existing_shows = doc.get("shows", {})
+        ex_list = existing_shows.get(show_key, [])
+        ex_list.append(vid_obj)
+        existing_shows[show_key] = ex_list
+        video_col.update_one(
+            {"date": target_date}, {"$set": {"shows": existing_shows}}
+        )
+
+      await query.message.reply_text(
+          "🎉 **सफलतापूर्वक परमानेंट सेव हो गया!**\n\n"
+          f"📺 **नया शो जोड़ा गया:** **{show_name}**\n"
+          f"📅 **तारीख:** **{target_date.title()}**\n\n"
+          "आगे से यह शो ऑटो-डिटेक्ट हो जाएगा! 🔥",
+          parse_mode="Markdown",
+      )
+
+  elif data.startswith("ott_") or data.endswith("_p1"):
+    all_shows = get_all_shows()
+    doc = video_col.find_one({"date": user_date})
+    date_db = doc.get("shows", {}) if doc else {}
+
+    show_buttons = []
+    for key, info in all_shows.items():
+      if info["ott"] == data and key in date_db and len(date_db[key]) > 0:
+        show_buttons.append([
+            InlineKeyboardButton(
+                f"{info['name']} ↗️", callback_data=f"show_{key}"
+            )
+        ])
+
+    if show_buttons:
+      show_buttons.append([
+          InlineKeyboardButton("⬅️ Choose OTT", callback_data="back_ott"),
+          InlineKeyboardButton("❌ Close", callback_data="close"),
+      ])
+      await query.message.edit_text(
+          f"🎬 **{data.split('_')[0].upper()} Shows**\n\n"
+          f"📅 **Chosen Date:** **{user_date.title()}**\n\n"
+          "🎯 **Choose a Show Below:**",
+          reply_markup=InlineKeyboardMarkup(show_buttons),
+          parse_mode="Markdown",
+      )
+    else:
+      await query.message.reply_text(
+          "❌ **No data found for that date.**", parse_mode="Markdown"
+      )
+
   elif data == "back_ott":
     buttons = [
         [InlineKeyboardButton("SunNXT", callback_data="sunnxt_p1")],
@@ -474,93 +495,12 @@ async def button_click(update: Update, context: ContextTypes.DEFAULT_TYPE):
         [InlineKeyboardButton("❌ Close", callback_data="close")],
     ]
     await query.message.edit_text(
-        f"✅ Data fetched successfully!\n\n📅 Date"
-        f" Requested:\n{user_date.title()}\n\n🔍 Please choose your desired OTT"
-        " below:",
+        "✅ **Data fetched successfully!**\n\n"
+        f"📅 **Date Requested:**\n**{user_date.title()}**\n\n"
+        "🔍 **Please choose your desired OTT below:**",
         reply_markup=InlineKeyboardMarkup(buttons),
         parse_mode="Markdown",
     )
-    return
-
-  elif data in UPLOAD_SHOWS:
-    await query.message.edit_text(
-        "🎯 कृपया शो चुनें जिसके लिए यह वीडियो/वीडियोस सेट करनी हैं:",
-        reply_markup=InlineKeyboardMarkup(UPLOAD_SHOWS[data]),
-    )
-    return
-
-  elif data.startswith("save_"):
-    show_key = data.replace("save_", "")
-    pending = context.user_data.get("pending_videos", [])
-    target_date = context.user_data.get("upload_target_date", "")
-
-    if pending and target_date:
-      doc = video_col.find_one({"date": target_date})
-      if not doc:
-        doc_data = {"date": target_date, "shows": {show_key: pending}}
-        video_col.insert_one(doc_data)
-        total_count = len(pending)
-      else:
-        existing_shows = doc.get("shows", {})
-        existing_list = existing_shows.get(show_key, [])
-        existing_list.extend(pending)
-        existing_shows[show_key] = existing_list
-        video_col.update_one(
-            {"date": target_date}, {"$set": {"shows": existing_shows}}
-        )
-        total_count = len(existing_list)
-
-      show_name = SHOW_NAME_MAP.get(
-          show_key, show_key.replace("_", " ").title()
-      )
-      context.user_data["pending_videos"] = []
-      context.user_data["upload_target_date"] = ""
-
-      await query.message.edit_text(
-          "✅ अपलोड सफल (MongoDB Saved)!\n\n"
-          f"📅 तारीख: {target_date.title()}\n"
-          f"📺 शो: {show_name}\n"
-          f"🎥 कुल लिंक्ड वीडियोस: {total_count}\n\n"
-          f"यह वीडियो सिर्फ {target_date.title()} सर्च करने पर ही मिलेगी! 🎉"
-      )
-    else:
-      await query.message.edit_text("❌ त्रुटि! कृपया पहले वीडियो भेजें।")
-    return
-
-  elif data in OTT_SHOWS_MAP:
-    ott_name = data.split("_")[0].upper()
-    all_shows = OTT_SHOWS_MAP[data]
-
-    doc = video_col.find_one({"date": user_date})
-    date_db = doc.get("shows", {}) if doc else {}
-
-    show_buttons = []
-    for key in all_shows:
-      if key in date_db and len(date_db[key]) > 0:
-        s_name = SHOW_NAME_MAP.get(key, key)
-        show_buttons.append(
-            [InlineKeyboardButton(f"{s_name} ↗️", callback_data=f"show_{key}")]
-        )
-
-    if show_buttons:
-      show_buttons.append([
-          InlineKeyboardButton("⬅️ Choose OTT", callback_data="back_ott"),
-          InlineKeyboardButton("❌ Close", callback_data="close"),
-      ])
-
-      text = (
-          f"🎬 {ott_name} Shows\n\n"
-          f"🍿 Chosen OTT: {ott_name}\n"
-          f"📅 Chosen Date: {user_date.title()}\n\n"
-          "🎯 Choose a Show Below:"
-      )
-      await query.message.edit_text(
-          text,
-          reply_markup=InlineKeyboardMarkup(show_buttons),
-          parse_mode="Markdown",
-      )
-    else:
-      await query.message.reply_text("❌ No data found for that date.")
 
   elif data.startswith("show_"):
     show_key = data.replace("show_", "")
@@ -570,20 +510,20 @@ async def button_click(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     if video_list:
       await query.message.delete()
-
       for vid_obj in video_list:
         await context.bot.send_video(
             chat_id=query.message.chat_id,
             video=vid_obj["id"],
             caption=vid_obj["caption"],
+            parse_mode="Markdown",
         )
 
       notice_text = (
-          "╭─────── ‼️ Auto-Delete Notice ‼️ ───────╮\n\n"
-          "🚨 Make sure to save the video!\n"
-          "⏰ Videos Will Be Auto-deleted After 60 minutes to avoid copyright"
-          " issue ⌛\n"
-          "📬 Forward it to Saved Messages and Watch there\n\n"
+          "╭─────── ‼️ **Auto-Delete Notice** ‼️ ───────╮\n\n"
+          "🚨 **Make sure to save the video!**\n"
+          "⏰ **Videos Will Be Auto-deleted After 60 minutes to avoid copyright"
+          " issue** ⌛\n"
+          "📬 **Forward it to Saved Messages and Watch there**\n\n"
           "╰────────────────────────────────────╯"
       )
       await context.bot.send_message(
@@ -591,13 +531,10 @@ async def button_click(update: Update, context: ContextTypes.DEFAULT_TYPE):
           text=notice_text,
           parse_mode="Markdown",
       )
-    else:
-      await query.message.reply_text("❌ No data found for that date.")
 
 
 if __name__ == "__main__":
   tg_app = ApplicationBuilder().token(BOT_TOKEN).build()
-
   tg_app.add_handler(CommandHandler("start", start_command))
   tg_app.add_handler(MessageHandler(filters.VIDEO, handle_video_upload))
   tg_app.add_handler(
@@ -605,5 +542,5 @@ if __name__ == "__main__":
   )
   tg_app.add_handler(CallbackQueryHandler(button_click))
 
-  print("आपका ऑल-इन-वन बॉट चालू हो गया है (MongoDB Connected)...")
+  print("बॉट चालू है (Tag Detection Active)...")
   tg_app.run_polling()
