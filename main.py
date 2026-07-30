@@ -21,7 +21,7 @@ app_flask = Flask(__name__)
 
 @app_flask.route("/")
 def home():
-  return "DKLR TV Bot Dynamic Auto-Show Engine Active!"
+  return "DKLR TV Bot 47 Master Shows Engine Active!"
 
 
 def run_flask():
@@ -53,9 +53,9 @@ db = client["dklr_bot_db"]
 video_col = db["videos"]
 shows_col = db["custom_shows"]
 
-# ----------------- MASTER SHOWS DATABASE -----------------
+# ----------------- MASTER SHOWS DATABASE (47 SHOWS INCLUDED) -----------------
 DEFAULT_SHOWS = {
-    # HOTSTAR SHOWS
+    # 🔴 HOTSTAR SHOWS
     "binddii": {"name": "Binddii", "ott": "hotstar_p1"},
     "oh_humnava": {
         "name": "Oh Humnava - Tum Dena Saath Mera",
@@ -87,7 +87,7 @@ DEFAULT_SHOWS = {
         "name": "Laughter Chefs Unlimited Entertainment",
         "ott": "hotstar_p1",
     },
-    # ZEE5 SHOWS
+    # 🟣 ZEE5 SHOWS
     "tu_hi_re": {"name": "Tu Hi Re Dil Mein", "ott": "zee5_p1"},
     "lakshmi_nivas": {"name": "Lakshmi Nivas", "ott": "zee5_p1"},
     "tumm_se_tumm": {"name": "Tumm Se Tumm Tak", "ott": "zee5_p1"},
@@ -97,7 +97,7 @@ DEFAULT_SHOWS = {
     "jagadhatri": {"name": "Jagadhatri", "ott": "zee5_p1"},
     "jaane_anjaane": {"name": "Jaane Anjaane Hum Mile", "ott": "zee5_p1"},
     "greatest_show": {"name": "The Greatest Show on Earth", "ott": "zee5_p1"},
-    # DANGAL PLAY SHOWS
+    # 🟠 DANGAL PLAY SHOWS
     "pati_anaadi": {"name": "PATI ANAADI", "ott": "dangal_p1"},
     "pati_bhramachari": {"name": "PATI BHRAMACHARI", "ott": "dangal_p1"},
     "mann_atisundar": {"name": "MANN ATISUNDAR", "ott": "dangal_p1"},
@@ -106,7 +106,7 @@ DEFAULT_SHOWS = {
     "tees_ke_paar": {"name": "TEES KE PAAR JAB MILA PYAR", "ott": "dangal_p1"},
     "kaisi_teri": {"name": "KAISI TERI DILLAGI", "ott": "dangal_p1"},
     "mann_sundar": {"name": "MANN SUNDAR", "ott": "dangal_p1"},
-    # SONYLIV SHOWS
+    # 🔵 SONYLIV SHOWS
     "hui_gumm": {
         "name": "Hui Gumm Yaadein Ek Doctor Do Zindagiyaan",
         "ott": "sonyliv_p1",
@@ -117,7 +117,7 @@ DEFAULT_SHOWS = {
     "pushpa": {"name": "Pushpa Impossible", "ott": "sonyliv_p1"},
     "indian_idol": {"name": "Indian Idol", "ott": "sonyliv_p1"},
     "ibd": {"name": "India's Best Dancer", "ott": "sonyliv_p1"},
-    # SUNNXT SHOWS
+    # 🟡 SUNNXT SHOWS
     "thodi_si_umeed": {
         "name": "Thodi Si Umeed Thoda Sa Aasman",
         "ott": "sunnxt_p1",
@@ -136,37 +136,47 @@ def get_all_shows():
 
 def detect_ott_tag(caption):
   text = caption.upper()
-  if (
-      ".HS." in text
-      or " HS " in text
-      or "HOTSTAR" in text
-      or "HS.WEB" in text
-      or "HOTSTAR" in text
-  ):
-    return "hotstar_p1"
-  elif (
-      ".Z5." in text
-      or " Z5 " in text
-      or "ZEE5" in text
-      or ".ZEE." in text
-      or "ZEE" in text
-  ):
-    return "zee5_p1"
-  elif (
-      ".SL." in text
-      or " SONY " in text
-      or "SONYLIV" in text
-      or ".SL " in text
-      or "SONY" in text
-  ):
-    return "sonyliv_p1"
-  elif (
-      ".DP." in text
-      or " DANGAL " in text
-      or "DANGALPLAY" in text
-      or "DANGAL" in text
+  if any(
+      k in text
+      for k in [
+          "DANGALPLAY",
+          "DANGAL",
+          ".DP.",
+          "PATI.BHRAMACHARI",
+          "PATI.ANAADI",
+          "MANN.SUNDAR",
+          "MANN.ATISUNDAR",
+          "RIMJHIM",
+          "ISHQ.JUNOONI",
+          "TEES.KE.PAAR",
+          "KAISI.TERI",
+      ]
   ):
     return "dangal_p1"
+  elif any(
+      k in text
+      for k in [
+          ".HS.",
+          " HS ",
+          "HOTSTAR",
+          "HS.WEB",
+          "STARPLUS",
+          "ANUPAMA",
+          "YRKKH",
+          "UDNE",
+          "FEVICREATE",
+          "LAUGHTER",
+      ]
+  ):
+    return "hotstar_p1"
+  elif any(
+      k in text for k in [".Z5.", " Z5 ", "ZEE5", ".ZEE.", "ZEE", "ZEE5.WEB"]
+  ):
+    return "zee5_p1"
+  elif any(
+      k in text for k in [".SL.", " SONY ", "SONYLIV", ".SL ", "SONY", "SONY.WEB"]
+  ):
+    return "sonyliv_p1"
   elif "SUNNXT" in text or ".SN." in text:
     return "sunnxt_p1"
   return "hotstar_p1"
@@ -182,21 +192,37 @@ def extract_show_title_auto(raw_name):
   clean_text = clean.replace(".", " ").replace("_", " ")
 
   parts = clean_text.split()
-  title_part = parts[0] if parts else "Auto Show"
-  title_part = re.sub(
-      r"(Season|Episode|Ep|E\d+|\d+)", "", title_part, flags=re.IGNORECASE
-  ).strip()
-  if not title_part or len(title_part) < 3:
-    title_part = "Auto Show " + raw_name[:8]
+  title_parts = []
+  for p in parts:
+    if re.search(
+        r"^(Season|Episode|Ep|E\d+|\d+p|Web|Dl|AAC|H|264|DangalPlay|Hotstar|Zee5|SonyLiv|SunNXT)",
+        p,
+        re.IGNORECASE,
+    ):
+      break
+    title_parts.append(p)
+
+  title_part = " ".join(title_parts).strip()
+  if not title_part or len(title_part) < 2:
+    title_part = "Show " + raw_name[:10]
   return title_part.title()
 
 
 def match_show(caption):
   clean_caption = caption.replace("_", " ").replace(".", " ").lower()
 
-  key_map = {
+  # 🎯 All 47 Titles Exact Keywords Matching
+  exact_map = {
+      # Dangal
       "mann sundar": "mann_sundar",
       "pati bhramachari": "pati_bhramachari",
+      "pati anaadi": "pati_anaadi",
+      "mann atisundar": "mann_atisundar",
+      "rimjhim": "rimjhim",
+      "ishq junooni": "ishq_junooni",
+      "tees ke paar": "tees_ke_paar",
+      "kaisi teri": "kaisi_teri",
+      # Hotstar
       "parshuram": "parshuram",
       "sairaab": "sairaab",
       "oh humnava": "oh_humnava",
@@ -210,49 +236,48 @@ def match_show(caption):
       "mahadev": "mahadev",
       "seher hone": "seher",
       "fevicreate": "fevicreate",
-      "tu hi re": "tu_hi_re",
-      "lakshmi nivas": "lakshmi_nivas",
-      "mann atisundar": "mann_atisundar",
-      "atisundar": "mann_atisundar",
-      "hui gumm": "hui_gumm",
-      "divya prem": "divya_prem",
-      "thodi si umeed": "thodi_si_umeed",
-      "aarambhi": "aarambhi",
-      "tumm se tumm": "tumm_se_tumm",
-      "rimjhim": "rimjhim",
-      "taarak mehta": "tmkoc",
-      "tmkoc": "tmkoc",
-      "ganga mai": "ganga_mai",
-      "hastinapur": "hastinapur",
-      "ishq junooni": "ishq_junooni",
-      "vasudha": "vasudha",
-      "humari radha": "humari_radha",
-      "tees ke paar": "tees_ke_paar",
-      "pushpa impossible": "pushpa",
-      "greatest show": "greatest_show",
-      "jagadhatri": "jagadhatri",
-      "indian idol": "indian_idol",
-      "kaisi teri": "kaisi_teri",
+      "udne ki": "udne_ki_aasha",
+      "aasha": "udne_ki_aasha",
       "kyunki saas": "kyunki_saas",
       "kyunki rishton": "kyunki_rishton",
-      "jaane anjaane": "jaane_anjaane",
-      "best dancer": "ibd",
-      "pati anaadi": "pati_anaadi",
-      "udne ki": "udne_ki_aasha",
       "laughter chefs": "laughter_chefs",
       "binddii": "binddii",
+      "aarambhi": "aarambhi",
+      "juliet": "juliet",
+      "do duniya": "do_duniya",
+      # Zee5
+      "tu hi re": "tu_hi_re",
+      "lakshmi nivas": "lakshmi_nivas",
+      "tumm se tumm": "tumm_se_tumm",
+      "ganga mai": "ganga_mai",
+      "vasudha": "vasudha",
+      "humari radha": "humari_radha",
+      "greatest show": "greatest_show",
+      "jagadhatri": "jagadhatri",
+      "jaane anjaane": "jaane_anjaane",
+      # SonyLiv
+      "hui gumm": "hui_gumm",
+      "taarak mehta": "tmkoc",
+      "tmkoc": "tmkoc",
+      "hastinapur": "hastinapur",
+      "tum ho naa": "tum_ho_naa",
+      "pushpa": "pushpa",
+      "indian idol": "indian_idol",
+      "best dancer": "ibd",
+      # SunNXT
+      "divya prem": "divya_prem",
+      "thodi si umeed": "thodi_si_umeed",
   }
 
-  for pattern, s_key in key_map.items():
+  for pattern, s_key in exact_map.items():
     if pattern in clean_caption:
       return s_key
 
-  all_shows = get_all_shows()
-  for s_key, data in all_shows.items():
-    name_clean = data["name"].lower().replace("-", " ")
-    words = [w for w in name_clean.split() if len(w) > 3]
-    if any(w in clean_caption for w in words):
-      return s_key
+  customs = shows_col.find()
+  for c in customs:
+    c_name = c["name"].lower().replace("-", " ")
+    if len(c_name) > 3 and c_name in clean_caption:
+      return c["key"]
 
   return None
 
@@ -286,7 +311,7 @@ def build_html_caption(raw_name):
 async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
   if update.message:
     await update.message.reply_text(
-        "<b>नमस्ते भाई! कृपया कोई तारीख लिखकर भेजें (जैसे: 25 July 2026)।</b>",
+        "<b>नमस्ते भाई! कृपया कोई तारीख लिखकर भेजें (जैसे: 28 July 2026)।</b>",
         parse_mode="HTML",
     )
 
@@ -312,7 +337,7 @@ async def handle_video_upload(
     total_rec = len(context.user_data["pending_videos"])
     await update.message.reply_text(
         f"🎥 <b>वीडियो प्राप्त हो गई! (कुल: {total_rec})</b>\n\n"
-        "✍️ <b>कृपया तारीख लिखकर भेजें (जैसे: 25 July 2026):</b>",
+        "✍️ <b>कृपया तारीख लिखकर भेजें (जैसे: 28 July 2026):</b>",
         parse_mode="HTML",
     )
 
@@ -323,7 +348,6 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
   text = update.message.text.strip()
 
-  # 📌 अगर मैनुअल शो ऐड करने का मोड ऑन है
   if context.user_data.get("adding_manual_show"):
     vid_data = context.user_data.get("manual_vid")
     target_date = context.user_data.get("manual_date")
@@ -332,14 +356,12 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     show_name = text.title()
     show_key = show_name.lower().replace(" ", "_")
 
-    # DB में नया बटन सेव करें
     shows_col.update_one(
         {"key": show_key},
         {"$set": {"key": show_key, "name": show_name, "ott": ott_tag}},
         upsert=True,
     )
 
-    # वीडियो को उस तारीख में सेव करें
     doc = video_col.find_one({"date": target_date})
     existing_shows = doc.get("shows", {}) if doc else {}
     ex_list = existing_shows.get(show_key, [])
@@ -365,7 +387,6 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
     return
 
-  # 📌 नॉर्मल वीडियो प्रोसेसिंग
   if context.user_data.get("awaiting_upload_date"):
     target_date = text.lower()
     context.user_data["awaiting_upload_date"] = False
@@ -417,11 +438,10 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     await update.message.reply_text(msg, parse_mode="HTML")
 
-    # 📌 अगर कोई अनमैच शो मिला तो अलग से बटन देकर पूछेगा
     if unmatched_list:
       await update.message.reply_text(
-          f"⚠️ <b>{len(unmatched_list)} शोज़ मैच नहीं हो पाए!</b>\n"
-          "नीचे दिए गए शोज़ के लिए बटन बनाने हेतु क्लिक करें:",
+          f"🚨 <b>कुल {len(unmatched_list)} अनमैच शोज़ मिले हैं!</b>\n"
+          "कृपया नीचे एक-एक करके शो का बटन बनाने के लिए बटन दबाएँ:",
           parse_mode="HTML",
       )
 
@@ -431,19 +451,18 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         btn = InlineKeyboardMarkup([[
             InlineKeyboardButton(
-                "➕ Add Show & Button",
+                f"➕ Add Show #{idx+1} Button",
                 callback_data=f"addmanual_{target_date}_{det_ott}_{idx}",
             )
         ]])
 
-        # टेंपरेरी स्टोर ताकि क्लिक करने पर नाम माँग सके
         context.user_data[f"unmatch_{idx}"] = u_vid
 
         await update.message.reply_text(
             f"❓ <b>Unmatched Show #{idx+1}:</b>\n"
             f"📄 <b>File Name:</b> <code>{u_vid['raw_name']}</code>\n"
-            f"💡 <b>Suggested Title:</b> {auto_suggested}\n"
-            f"📺 <b>Detected OTT:</b> {det_ott.split('_')[0].upper()}",
+            f"💡 <b>Suggested Title:</b> <b>{auto_suggested}</b>\n"
+            f"📺 <b>Target OTT:</b> <b>{det_ott.split('_')[0].upper()}</b>",
             reply_markup=btn,
             parse_mode="HTML",
         )
@@ -614,4 +633,33 @@ def start_userbot():
   )
 
   @userbot.on_message(
-      filters.chat(SOURCE_CHANNELS) & (filters.video | filters.document
+      filters.chat(SOURCE_CHANNELS) & (filters.video | filters.document)
+  )
+  async def forward_video(client, message):
+    try:
+      await message.forward(TARGET_BOT_USERNAME)
+      print("✅ [UserBot] Auto-forwarded video successfully!")
+    except Exception as e:
+      print(f"❌ [UserBot Error]: {e}")
+
+  try:
+    print("🚀 [UserBot] Background Auto-Forwarder Starting...")
+    userbot.run()
+  except Exception as e:
+    print(f"⚠️ UserBot Exception: {e}")
+
+
+if __name__ == "__main__":
+  ub_thread = Thread(target=start_userbot, daemon=True)
+  ub_thread.start()
+
+  tg_app = ApplicationBuilder().token(BOT_TOKEN).build()
+  tg_app.add_handler(CommandHandler("start", start_command))
+  tg_app.add_handler(MessageHandler(tg_filters.VIDEO, handle_video_upload))
+  tg_app.add_handler(
+      MessageHandler(tg_filters.TEXT & ~tg_filters.COMMAND, handle_text)
+  )
+  tg_app.add_handler(CallbackQueryHandler(button_click))
+
+  print("DKLR TV Bot 47 Master Shows Engine Active...")
+  tg_app.run_polling()
