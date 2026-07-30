@@ -623,11 +623,12 @@ async def button_click(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
           )
       else:
-        disp_date = user_date.title() if user_date else "Selected Date"
-        await query.message.reply_text(
-            f"❌ <b>इस तारीख ({disp_date}) में इस शो की कोई वीडियो उपलब्ध नहीं है!</b>",
-            parse_mode="HTML",
-        )
+          disp_date = user_date.title() if user_date else "Selected Date"
+          await query.message.reply_text(
+              f"❌ <b>इस तारीख ({disp_date}) में इस शो की कोई वीडियो उपलब्ध नहीं"
+              " है!</b>",
+              parse_mode="HTML",
+          )
 
 
 # ----------------- BACKGROUND USERBOT RUNNER -----------------
