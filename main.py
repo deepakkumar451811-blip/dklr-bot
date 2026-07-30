@@ -15,13 +15,13 @@ from telegram.ext import (
     filters as tg_filters,
 )
 
-# ----------------- FLASK SERVER FOR RENDER -----------------
+# ----------------- FLASK SERVER FOR RENDER (KEEP-ALIVE) -----------------
 app_flask = Flask(__name__)
 
 
 @app_flask.route("/")
 def home():
-  return "DKLR TV Bot 47 Master Shows Engine Active!"
+  return "DKLR TV Bot + Integrated UserBot Active!"
 
 
 def run_flask():
@@ -211,7 +211,6 @@ def extract_show_title_auto(raw_name):
 def match_show(caption):
   clean_caption = caption.replace("_", " ").replace(".", " ").lower()
 
-  # 🎯 All 47 Titles Exact Keywords Matching
   exact_map = {
       # Dangal
       "mann sundar": "mann_sundar",
@@ -348,6 +347,7 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
   text = update.message.text.strip()
 
+  # 📌 1. मैनुअल शो जोड़ने के लिए
   if context.user_data.get("adding_manual_show"):
     vid_data = context.user_data.get("manual_vid")
     target_date = context.user_data.get("manual_date")
@@ -366,6 +366,8 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     existing_shows = doc.get("shows", {}) if doc else {}
     ex_list = existing_shows.get(show_key, [])
 
+    # Same Content Delete Old & Replace Fresh
+    ex_list = [v for v in ex_list if v["id"] != vid_data["id"]]
     ex_list.append({"id": vid_data["id"], "raw_name": vid_data["raw_name"]})
     existing_shows[show_key] = ex_list
 
@@ -382,11 +384,12 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"🎬 <b>Show Name:</b> {show_name}\n"
         f"📺 <b>OTT:</b> {ott_tag.split('_')[0].upper()}\n"
         f"📅 <b>Date:</b> {target_date.title()}\n\n"
-        "🎉 <b>बटन ऑटोमैटिक बन गया है और वीडियो सेव हो गई है!</b>",
+        "🎉 <b>पुराना डेटा रिप्लेस होकर नया बटन बन गया है!</b>",
         parse_mode="HTML",
     )
     return
 
+  # 📌 2. तारीख प्रोसेसिंग (Same Content Replace & Auto Add Logic)
   if context.user_data.get("awaiting_upload_date"):
     target_date = text.lower()
     context.user_data["awaiting_upload_date"] = False
@@ -395,7 +398,7 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data["pending_videos"] = []
 
     auto_saved = 0
-    duplicate_count = 0
+    replaced_count = 0
     unmatched_list = []
 
     doc = video_col.find_one({"date": target_date})
@@ -409,14 +412,15 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         continue
 
       ex_list = existing_shows.get(matched_key, [])
-      is_duplicate = any(v["id"] == vid["id"] for v in ex_list)
 
-      if is_duplicate:
-        duplicate_count += 1
-        continue
+      # 🔄 Same Content होने पर पुराना डेटा हटा कर नया जोड़ेगा
+      initial_len = len(ex_list)
+      ex_list = [v for v in ex_list if v["id"] != vid["id"]]
 
-      vid_obj = {"id": vid["id"], "raw_name": vid["raw_name"]}
-      ex_list.append(vid_obj)
+      if len(ex_list) < initial_len:
+        replaced_count += 1
+
+      ex_list.append({"id": vid["id"], "raw_name": vid["raw_name"]})
       existing_shows[matched_key] = ex_list
       auto_saved += 1
 
@@ -430,11 +434,11 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     msg = f"✅ <b>तारीख सेट हो गई:</b> <b>{target_date.title()}</b>\n\n"
     msg += (
-        f"🤖 <b>स्वचालित रूप से (Matched) सेव हुए:</b> <b>{auto_saved} शोज़</b>\n"
+        f"🤖 <b>सफलतापूर्वक नए शो में सेव हुए:</b> <b>{auto_saved} वीडियोस</b>\n"
     )
 
-    if duplicate_count > 0:
-      msg += f"⚠️ <b>पहले से मौजूद (Duplicates):</b> <b>{duplicate_count} वीडियोस</b>\n"
+    if replaced_count > 0:
+      msg += f"🔄 <b>पुराने रिप्लेस (Delete & Update) किए गए:</b> <b>{replaced_count} वीडियोस</b>\n"
 
     await update.message.reply_text(msg, parse_mode="HTML")
 
@@ -468,6 +472,7 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
     return
 
+  # 📌 3. यूजर की तारीख क्वेरी
   months = [
       "january",
       "february",
@@ -615,13 +620,14 @@ async def button_click(update: Update, context: ContextTypes.DEFAULT_TYPE):
           chat_id=query.message.chat_id,
           text=notice_text,
           parse_mode="HTML",
-      )
-    else:
-      disp_date = user_date.title() if user_date else "Selected Date"
-      await query.message.reply_text(
-          f"❌ <b>इस तारीख ({disp_date}) में इस शो की कोई वीडियो उपलब्ध नहीं है!</b>",
-          parse_mode="HTML",
-      )
+
+          )
+      else:
+        disp_date = user_date.title() if user_date else "Selected Date"
+        await query.message.reply_text(
+            f"❌ <b>इस तारीख ({disp_date}) में इस शो की कोई वीडियो उपलब्ध नहीं है!</b>",
+            parse_mode="HTML",
+        )
 
 
 # ----------------- BACKGROUND USERBOT RUNNER -----------------
@@ -661,5 +667,5 @@ if __name__ == "__main__":
   )
   tg_app.add_handler(CallbackQueryHandler(button_click))
 
-  print("DKLR TV Bot 47 Master Shows Engine Active...")
+  print("DKLR TV Bot Final Engine Active...")
   tg_app.run_polling()
