@@ -1,8 +1,5 @@
-python-telegram-bot
-requests
-flask
-pymongo
-dnspython
-gunicorn
-pyrogram
-tgcrypto
+python-telegram-bot==20.7
+pyrogram==2.0.106
+tgcrypto==1.2.5
+pymongo[srv]==4.6.1
+flask==3.0.0
