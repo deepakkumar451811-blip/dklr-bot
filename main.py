@@ -625,10 +625,8 @@ async def button_click(update: Update, context: ContextTypes.DEFAULT_TYPE):
       )
 
 
-# ----------------- BACKGROUND USERBOT RUNNER -----------------
-def start_userbot():
-  loop = asyncio.new_event_loop()
-  asyncio.set_event_loop(loop)
+# ----------------- BACKGROUND USERBOT ASYNC RUNNER -----------------
+async def run_userbot():
   userbot = Client(
       "dklr_integrated_userbot", api_id=API_ID, api_hash=API_HASH
   )
@@ -644,16 +642,18 @@ def start_userbot():
       print(f"❌ [UserBot Error]: {e}")
 
   try:
-    print("🚀 [UserBot] Background Auto-Forwarder Starting...")
-    userbot.run()
+    print("🚀 [UserBot] Starting background engine...")
+    await userbot.start()
+    print("✅ [UserBot] Active & Listening!")
   except Exception as e:
-    print(f"⚠️ UserBot Exception: {e}")
+    print(f"⚠️ [UserBot Exception]: {e}")
 
 
-if __name__ == "__main__":
-  ub_thread = Thread(target=start_userbot, daemon=True)
-  ub_thread.start()
+async def main():
+  # Start UserBot background task in main loop
+  asyncio.create_task(run_userbot())
 
+  # Build & start Telegram Bot
   tg_app = ApplicationBuilder().token(BOT_TOKEN).build()
   tg_app.add_handler(CommandHandler("start", start_command))
   tg_app.add_handler(MessageHandler(tg_filters.VIDEO, handle_video_upload))
@@ -662,5 +662,14 @@ if __name__ == "__main__":
   )
   tg_app.add_handler(CallbackQueryHandler(button_click))
 
-  print("DKLR TV Bot Engine Active...")
-  tg_app.run_polling()
+  print("DKLR TV Bot Engine Fully Online...")
+  await tg_app.initialize()
+  await tg_app.start()
+  await tg_app.updater.start_polling()
+
+  # Keep running indefinitely
+  await asyncio.Event().wait()
+
+
+if __name__ == "__main__":
+  asyncio.run(main())
