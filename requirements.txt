@@ -3,3 +3,6 @@ requests
 flask
 pymongo
 dnspython
+gunicorn
+pyrogram
+tgcrypto
