@@ -21,7 +21,7 @@ app_flask = Flask(__name__)
 
 @app_flask.route("/")
 def home():
-  return "DKLR TV Bot + Integrated UserBot Active!"
+  return "DKLR TV Bot Active!"
 
 
 def run_flask():
@@ -53,9 +53,9 @@ db = client["dklr_bot_db"]
 video_col = db["videos"]
 shows_col = db["custom_shows"]
 
-# ----------------- MASTER SHOWS DATABASE (47 SHOWS INCLUDED) -----------------
+# ----------------- MASTER SHOWS DATABASE -----------------
 DEFAULT_SHOWS = {
-    # 🔴 HOTSTAR SHOWS
+    # HOTSTAR
     "binddii": {"name": "Binddii", "ott": "hotstar_p1"},
     "oh_humnava": {
         "name": "Oh Humnava - Tum Dena Saath Mera",
@@ -87,7 +87,7 @@ DEFAULT_SHOWS = {
         "name": "Laughter Chefs Unlimited Entertainment",
         "ott": "hotstar_p1",
     },
-    # 🟣 ZEE5 SHOWS
+    # ZEE5
     "tu_hi_re": {"name": "Tu Hi Re Dil Mein", "ott": "zee5_p1"},
     "lakshmi_nivas": {"name": "Lakshmi Nivas", "ott": "zee5_p1"},
     "tumm_se_tumm": {"name": "Tumm Se Tumm Tak", "ott": "zee5_p1"},
@@ -97,7 +97,7 @@ DEFAULT_SHOWS = {
     "jagadhatri": {"name": "Jagadhatri", "ott": "zee5_p1"},
     "jaane_anjaane": {"name": "Jaane Anjaane Hum Mile", "ott": "zee5_p1"},
     "greatest_show": {"name": "The Greatest Show on Earth", "ott": "zee5_p1"},
-    # 🟠 DANGAL PLAY SHOWS
+    # DANGAL PLAY
     "pati_anaadi": {"name": "PATI ANAADI", "ott": "dangal_p1"},
     "pati_bhramachari": {"name": "PATI BHRAMACHARI", "ott": "dangal_p1"},
     "mann_atisundar": {"name": "MANN ATISUNDAR", "ott": "dangal_p1"},
@@ -106,7 +106,7 @@ DEFAULT_SHOWS = {
     "tees_ke_paar": {"name": "TEES KE PAAR JAB MILA PYAR", "ott": "dangal_p1"},
     "kaisi_teri": {"name": "KAISI TERI DILLAGI", "ott": "dangal_p1"},
     "mann_sundar": {"name": "MANN SUNDAR", "ott": "dangal_p1"},
-    # 🔵 SONYLIV SHOWS
+    # SONYLIV
     "hui_gumm": {
         "name": "Hui Gumm Yaadein Ek Doctor Do Zindagiyaan",
         "ott": "sonyliv_p1",
@@ -117,7 +117,7 @@ DEFAULT_SHOWS = {
     "pushpa": {"name": "Pushpa Impossible", "ott": "sonyliv_p1"},
     "indian_idol": {"name": "Indian Idol", "ott": "sonyliv_p1"},
     "ibd": {"name": "India's Best Dancer", "ott": "sonyliv_p1"},
-    # 🟡 SUNNXT SHOWS
+    # SUNNXT
     "thodi_si_umeed": {
         "name": "Thodi Si Umeed Thoda Sa Aasman",
         "ott": "sunnxt_p1",
@@ -347,7 +347,6 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
   text = update.message.text.strip()
 
-  # 📌 1. मैनुअल शो जोड़ने के लिए
   if context.user_data.get("adding_manual_show"):
     vid_data = context.user_data.get("manual_vid")
     target_date = context.user_data.get("manual_date")
@@ -366,7 +365,6 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     existing_shows = doc.get("shows", {}) if doc else {}
     ex_list = existing_shows.get(show_key, [])
 
-    # Same Content Delete Old & Replace Fresh
     ex_list = [v for v in ex_list if v["id"] != vid_data["id"]]
     ex_list.append({"id": vid_data["id"], "raw_name": vid_data["raw_name"]})
     existing_shows[show_key] = ex_list
@@ -389,7 +387,6 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
     return
 
-  # 📌 2. तारीख प्रोसेसिंग (Same Content Replace & Auto Add Logic)
   if context.user_data.get("awaiting_upload_date"):
     target_date = text.lower()
     context.user_data["awaiting_upload_date"] = False
@@ -413,7 +410,6 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
       ex_list = existing_shows.get(matched_key, [])
 
-      # 🔄 Same Content होने पर पुराना डेटा हटा कर नया जोड़ेगा
       initial_len = len(ex_list)
       ex_list = [v for v in ex_list if v["id"] != vid["id"]]
 
@@ -472,7 +468,6 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
     return
 
-  # 📌 3. यूजर की तारीख क्वेरी
   months = [
       "january",
       "february",
@@ -620,15 +615,14 @@ async def button_click(update: Update, context: ContextTypes.DEFAULT_TYPE):
           chat_id=query.message.chat_id,
           text=notice_text,
           parse_mode="HTML",
-
-          )
-      else:
-          disp_date = user_date.title() if user_date else "Selected Date"
-          await query.message.reply_text(
-              f"❌ <b>इस तारीख ({disp_date}) में इस शो की कोई वीडियो उपलब्ध नहीं"
-              " है!</b>",
-              parse_mode="HTML",
-          )
+      )
+    else:
+      disp_date = user_date.title() if user_date else "Selected Date"
+      await query.message.reply_text(
+          f"❌ <b>इस तारीख ({disp_date}) में इस शो की कोई वीडियो उपलब्ध नहीं"
+          " है!</b>",
+          parse_mode="HTML",
+      )
 
 
 # ----------------- BACKGROUND USERBOT RUNNER -----------------
@@ -668,5 +662,5 @@ if __name__ == "__main__":
   )
   tg_app.add_handler(CallbackQueryHandler(button_click))
 
-  print("DKLR TV Bot Final Engine Active...")
+  print("DKLR TV Bot Engine Active...")
   tg_app.run_polling()
