@@ -21,7 +21,7 @@ app_flask = Flask(__name__)
 
 @app_flask.route("/")
 def home():
-  return "DKLR TV Bot Engine Active!"
+  return "DKLR Show Hub Engine Active!"
 
 
 def run_flask():
@@ -37,7 +37,9 @@ def keep_alive():
 keep_alive()
 
 # ----------------- CONFIG & MONGODB SETUP -----------------
-BOT_TOKEN = "8909033238:AAHiDgwzXyNCRplZ8GTEGvTJJyrGS7kX20o"
+BOT_TOKEN = os.environ.get(
+    "BOT_TOKEN", "8658926437:AAHnzF23ypbzIbZ-yATBhA0MHFGVOhVsTzA"
+)
 MONGO_URI = os.environ.get(
     "MONGO_URI",
     "mongodb+srv://deepakkumar451811_db_user:z0gBb13CSvYAECgG@cluster0.osysn1c.mongodb.net/?appName=Cluster0",
@@ -186,8 +188,8 @@ def extract_show_title_auto(raw_name):
   clean = (
       raw_name.replace("TvShowHub", "")
       .replace("tvshowhub", "")
+      .replace("DKLRShowhub", "")
       .replace("DKLRDR", "")
-      .replace("DKLR_DR", "")
   )
   clean_text = clean.replace(".", " ").replace("_", " ")
 
@@ -281,7 +283,7 @@ def match_show(caption):
   return None
 
 
-# ----------------- UNIVERSAL BRAND CLEANER -----------------
+# ----------------- BRAND CLEANER & CAPTION BUILDER -----------------
 def build_html_caption(raw_name):
   clean_name = (
       raw_name.replace("*", "")
@@ -290,28 +292,29 @@ def build_html_caption(raw_name):
       .strip()
   )
 
-  # 1. Strip standard video extension if present
+  # 1. Video extension hatayein (.mp4, .mkv etc)
   base_name = re.sub(
       r"\.(mp4|mkv|avi|mov|webm|flv)$", "", clean_name, flags=re.IGNORECASE
   )
 
-  # 2. Strip any trailing brand/channel tags (TvShowHub, ANTONi, DG_Contents, webdlbot, UtsavTV, etc)
+  # 2. Promotional/Source tags hatayein
   base_name = re.sub(
-      r"[-_.\s]+(TvShowHub|ANTONi|webdlbot|DG_Contents|DG_Content|UtsavTV|Nx-DRM-DL|DS_Ottwebdlbot|kairax007|ottwebdlbot|DKLR_DR|DKLRDR)[-_.\s]*$",
+      r"[-_.\s]+(TvShowHub|ANTONi|webdlbot|DG_Contents|DG_Content|UtsavTV|Nx-DRM-DL|DS_Ottwebdlbot|kairax007|ottwebdlbot|DKLR_DR|DKLRDR|DKLRShowhub)[-_.\s]*$",
       "",
       base_name,
       flags=re.IGNORECASE,
   )
 
-  # 3. Strip any leftover tag after last hyphen or underscore at the end
+  # 3. Extra trailing hyphens/underscores hatayein
   base_name = re.sub(r"[-_]+[a-zA-Z0-9]+$", "", base_name)
 
-  # 4. Attach Official Universal Brand Extension
-  final_filename = f"{base_name.strip('.-_')}.DKLRDR.mp4"
+  # 4. Attach Updated Official Brand Extension
+  final_filename = f"{base_name.strip('.-_')}.DKLRShowhub.mp4"
 
+  # 5. Exact Requested Format Caption
   return (
       f"<b>{final_filename}</b>\n\n"
-      "⚡️ <b>Join :-</b> [ <b>@DKLRDR</b> ]\n\n"
+      "⚡️ <b>Join :-</b> [ <b>@DKLRShowhub</b> ]\n\n"
       '📌 <b>Join:</b> <a'
       ' href="https://t.me/+AT1UIPpK3c04MTk1">https://t.me/+AT1UIPpK3c04MTk1</a>\n\n'
       '📌 <b>Upcoming New Episode -</b> <a'
@@ -376,7 +379,6 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     doc = video_col.find_one({"date": target_date})
     existing_shows = doc.get("shows", {}) if doc else {}
 
-    # DATABASE OVERWRITE REPLACEMENT
     existing_shows[show_key] = [
         {"id": vid_data["id"], "raw_name": vid_data["raw_name"]}
     ]
@@ -430,7 +432,7 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     for key, vids in new_uploads_grouped.items():
       if key in existing_shows and len(existing_shows[key]) > 0:
         replaced_count += len(existing_shows[key])
-      existing_shows[key] = vids  # Overwrite old batch in DB
+      existing_shows[key] = vids
       auto_saved += len(vids)
 
     if auto_saved > 0:
@@ -624,7 +626,7 @@ async def button_click(update: Update, context: ContextTypes.DEFAULT_TYPE):
       sent_messages = []
 
       for vid_obj in video_list:
-        r_name = vid_obj.get("raw_name", "Episode_Video.DKLRDR.mp4")
+        r_name = vid_obj.get("raw_name", "Episode_Video.DKLRShowhub.mp4")
         fresh_caption = build_html_caption(r_name)
 
         sent_vid = await context.bot.send_video(
@@ -659,7 +661,9 @@ async def button_click(update: Update, context: ContextTypes.DEFAULT_TYPE):
           except Exception:
             pass
 
-      asyncio.create_task(auto_delete_task(query.message.chat_id, sent_messages))
+      asyncio.create_task(
+          auto_delete_task(query.message.chat_id, sent_messages)
+      )
 
     else:
       disp_date = user_date.title() if user_date else "Selected Date"
@@ -711,7 +715,7 @@ def main():
   )
   tg_app.add_handler(CallbackQueryHandler(button_click))
 
-  print("DKLR TV Bot Universal Cleaner Live...")
+  print("DKLR Show Hub Bot Engine Live...")
   tg_app.run_polling(close_loop=False)
 
 
