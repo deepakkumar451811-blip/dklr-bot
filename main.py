@@ -21,7 +21,7 @@ app_flask = Flask(__name__)
 
 @app_flask.route("/")
 def home():
-  return "DKLR TV Bot Active!"
+  return "DKLR TV Bot Engine Active!"
 
 
 def run_flask():
@@ -625,10 +625,13 @@ async def button_click(update: Update, context: ContextTypes.DEFAULT_TYPE):
       )
 
 
-# ----------------- BACKGROUND USERBOT ASYNC RUNNER -----------------
-async def run_userbot():
+# ----------------- BACKGROUND USERBOT RUNNER -----------------
+async def start_userbot():
   userbot = Client(
-      "dklr_integrated_userbot", api_id=API_ID, api_hash=API_HASH
+      "dklr_integrated_userbot",
+      api_id=API_ID,
+      api_hash=API_HASH,
+      in_memory=True,
   )
 
   @userbot.on_message(
@@ -642,18 +645,22 @@ async def run_userbot():
       print(f"❌ [UserBot Error]: {e}")
 
   try:
-    print("🚀 [UserBot] Starting background engine...")
+    print("🚀 [UserBot] Starting Engine...")
     await userbot.start()
     print("✅ [UserBot] Active & Listening!")
   except Exception as e:
-    print(f"⚠️ [UserBot Exception]: {e}")
+    print(f"⚠️ UserBot Exception: {e}")
 
 
-async def main():
-  # Start UserBot background task in main loop
-  asyncio.create_task(run_userbot())
+def main():
+  # Setup Event Loop explicitly
+  loop = asyncio.new_event_loop()
+  asyncio.set_event_loop(loop)
 
-  # Build & start Telegram Bot
+  # Start Userbot in the active loop
+  loop.create_task(start_userbot())
+
+  # Telegram Bot Setup
   tg_app = ApplicationBuilder().token(BOT_TOKEN).build()
   tg_app.add_handler(CommandHandler("start", start_command))
   tg_app.add_handler(MessageHandler(tg_filters.VIDEO, handle_video_upload))
@@ -662,14 +669,9 @@ async def main():
   )
   tg_app.add_handler(CallbackQueryHandler(button_click))
 
-  print("DKLR TV Bot Engine Fully Online...")
-  await tg_app.initialize()
-  await tg_app.start()
-  await tg_app.updater.start_polling()
-
-  # Keep running indefinitely
-  await asyncio.Event().wait()
+  print("DKLR TV Bot Final Engine Active...")
+  tg_app.run_polling(close_loop=False)
 
 
 if __name__ == "__main__":
-  asyncio.run(main())
+  main()
