@@ -561,14 +561,20 @@ async def button_click(update: Update, context: ContextTypes.DEFAULT_TYPE):
   elif data.startswith("ott_") or data.endswith("_p1"):
     all_shows = get_all_shows()
 
+    # DYNAMIC FILTER: Check which shows actually have videos uploaded for 'user_date'
+    doc = video_col.find_one({"date": user_date})
+    uploaded_shows_dict = doc.get("shows", {}) if doc else {}
+
     show_buttons = []
     for key, info in all_shows.items():
       if info["ott"] == data:
-        show_buttons.append([
-            InlineKeyboardButton(
-                f"{info['name']} ↗️", callback_data=f"show_{key}"
-            )
-        ])
+        # ONLY ADD BUTTON IF VIDEOS EXIST IN DATABASE FOR THIS SHOW ON THIS DATE!
+        if key in uploaded_shows_dict and len(uploaded_shows_dict[key]) > 0:
+          show_buttons.append([
+              InlineKeyboardButton(
+                  f"{info['name']} ↗️", callback_data=f"show_{key}"
+              )
+          ])
 
     disp_date = user_date.title() if user_date else "Selected Date"
 
@@ -580,8 +586,20 @@ async def button_click(update: Update, context: ContextTypes.DEFAULT_TYPE):
       await query.message.edit_text(
           f"🎬 <b>{data.split('_')[0].upper()} Shows</b>\n\n"
           f"📅 <b>Chosen Date:</b> <b>{disp_date}</b>\n\n"
-          "🎯 <b>Choose a Show Below:</b>",
+          "🎯 <b>Available Shows Below:</b>",
           reply_markup=InlineKeyboardMarkup(show_buttons),
+          parse_mode="HTML",
+      )
+    else:
+      # If no videos uploaded for this OTT on that date
+      back_btn = InlineKeyboardMarkup([
+          [InlineKeyboardButton("⬅️ Choose OTT", callback_data="back_ott")],
+          [InlineKeyboardButton("❌ Close", callback_data="close")],
+      ])
+      await query.message.edit_text(
+          f"❌ <b>इस तारीख ({disp_date}) में {data.split('_')[0].upper()} पर कोई"
+          " भी वीडियो अपलोड नहीं की गई है!</b>",
+          reply_markup=back_btn,
           parse_mode="HTML",
       )
 
@@ -669,7 +687,7 @@ def main():
   )
   tg_app.add_handler(CallbackQueryHandler(button_click))
 
-  print("DKLR TV Bot Final Engine Active...")
+  print("DKLR TV Bot Dynamic Button Filter Active...")
   tg_app.run_polling(close_loop=False)
 
 
