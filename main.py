@@ -363,11 +363,11 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     doc = video_col.find_one({"date": target_date})
     existing_shows = doc.get("shows", {}) if doc else {}
-    ex_list = existing_shows.get(show_key, [])
 
-    ex_list = [v for v in ex_list if v["id"] != vid_data["id"]]
-    ex_list.append({"id": vid_data["id"], "raw_name": vid_data["raw_name"]})
-    existing_shows[show_key] = ex_list
+    # DATABASE REPLACEMENT: Delete old & add new
+    existing_shows[show_key] = [
+        {"id": vid_data["id"], "raw_name": vid_data["raw_name"]}
+    ]
 
     if not doc:
       video_col.insert_one({"date": target_date, "shows": existing_shows})
@@ -401,24 +401,27 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     doc = video_col.find_one({"date": target_date})
     existing_shows = doc.get("shows", {}) if doc else {}
 
+    # Group incoming videos by show_key
+    new_uploads_grouped = {}
+
     for vid in pending:
       matched_key = match_show(vid["raw_name"])
-
       if not matched_key:
         unmatched_list.append(vid)
         continue
 
-      ex_list = existing_shows.get(matched_key, [])
+      if matched_key not in new_uploads_grouped:
+        new_uploads_grouped[matched_key] = []
+      new_uploads_grouped[matched_key].append(
+          {"id": vid["id"], "raw_name": vid["raw_name"]}
+      )
 
-      initial_len = len(ex_list)
-      ex_list = [v for v in ex_list if v["id"] != vid["id"]]
-
-      if len(ex_list) < initial_len:
-        replaced_count += 1
-
-      ex_list.append({"id": vid["id"], "raw_name": vid["raw_name"]})
-      existing_shows[matched_key] = ex_list
-      auto_saved += 1
+    # REPLACEMENT LOGIC: OVERWRITE OLD VIDEOS IN DATABASE FOR MATCHED SHOWS
+    for key, vids in new_uploads_grouped.items():
+      if key in existing_shows and len(existing_shows[key]) > 0:
+        replaced_count += len(existing_shows[key])
+      existing_shows[key] = vids  # Overwrite with latest batch
+      auto_saved += len(vids)
 
     if auto_saved > 0:
       if not doc:
@@ -434,7 +437,8 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
 
     if replaced_count > 0:
-      msg += f"🔄 <b>पुराने रिप्लेस (Delete & Update) किए गए:</b> <b>{replaced_count} वीडियोस</b>\n"
+      msg += f"🔄 <b>पुराने डेटाबेस से रिप्लेस (Delete & Update) किए गए:</b>"
+      f" <b>{replaced_count} वीडियोस</b>\n"
 
     await update.message.reply_text(msg, parse_mode="HTML")
 
@@ -561,14 +565,13 @@ async def button_click(update: Update, context: ContextTypes.DEFAULT_TYPE):
   elif data.startswith("ott_") or data.endswith("_p1"):
     all_shows = get_all_shows()
 
-    # DYNAMIC FILTER: Check which shows actually have videos uploaded for 'user_date'
+    # DYNAMIC FILTER: Show only buttons which have videos for 'user_date'
     doc = video_col.find_one({"date": user_date})
     uploaded_shows_dict = doc.get("shows", {}) if doc else {}
 
     show_buttons = []
     for key, info in all_shows.items():
       if info["ott"] == data:
-        # ONLY ADD BUTTON IF VIDEOS EXIST IN DATABASE FOR THIS SHOW ON THIS DATE!
         if key in uploaded_shows_dict and len(uploaded_shows_dict[key]) > 0:
           show_buttons.append([
               InlineKeyboardButton(
@@ -591,14 +594,13 @@ async def button_click(update: Update, context: ContextTypes.DEFAULT_TYPE):
           parse_mode="HTML",
       )
     else:
-      # If no videos uploaded for this OTT on that date
       back_btn = InlineKeyboardMarkup([
           [InlineKeyboardButton("⬅️ Choose OTT", callback_data="back_ott")],
           [InlineKeyboardButton("❌ Close", callback_data="close")],
       ])
       await query.message.edit_text(
           f"❌ <b>इस तारीख ({disp_date}) में {data.split('_')[0].upper()} पर कोई"
-          " भी वीडियो अपलोड नहीं की गई है!</b>",
+          " भी वीडियो उपलब्ध नहीं है!</b>",
           reply_markup=back_btn,
           parse_mode="HTML",
       )
@@ -610,16 +612,19 @@ async def button_click(update: Update, context: ContextTypes.DEFAULT_TYPE):
     video_list = date_db.get(show_key, [])
 
     if video_list:
+      sent_messages = []
+
       for vid_obj in video_list:
         r_name = vid_obj.get("raw_name", "Episode_Video.DKLRDR.mp4")
         fresh_caption = build_html_caption(r_name)
 
-        await context.bot.send_video(
+        sent_vid = await context.bot.send_video(
             chat_id=query.message.chat_id,
             video=vid_obj["id"],
             caption=fresh_caption,
             parse_mode="HTML",
         )
+        sent_messages.append(sent_vid.message_id)
 
       notice_text = (
           "╭─────── ‼️ <b>Auto-Delete Notice</b> ‼️ ───────╮\n\n"
@@ -629,11 +634,25 @@ async def button_click(update: Update, context: ContextTypes.DEFAULT_TYPE):
           "📬 <b>Forward it to Saved Messages and Watch there</b>\n\n"
           "╰────────────────────────────────────╯"
       )
-      await context.bot.send_message(
+      sent_notice = await context.bot.send_message(
           chat_id=query.message.chat_id,
           text=notice_text,
           parse_mode="HTML",
       )
+      sent_messages.append(sent_notice.message_id)
+
+      # ----------------- 60 MINUTE CHAT AUTO-DELETE TIMER -----------------
+      async def auto_delete_task(chat_id, msg_ids):
+        await asyncio.sleep(3600)  # 3600 seconds = 60 mins
+        for mid in msg_ids:
+          try:
+            await context.bot.delete_message(chat_id=chat_id, message_id=mid)
+          except Exception:
+            pass
+
+      asyncio.create_task(auto_delete_task(query.message.chat_id, sent_messages))
+      # ---------------------------------------------------------------------
+
     else:
       disp_date = user_date.title() if user_date else "Selected Date"
       await query.message.reply_text(
@@ -671,14 +690,11 @@ async def start_userbot():
 
 
 def main():
-  # Setup Event Loop explicitly
   loop = asyncio.new_event_loop()
   asyncio.set_event_loop(loop)
 
-  # Start Userbot in the active loop
   loop.create_task(start_userbot())
 
-  # Telegram Bot Setup
   tg_app = ApplicationBuilder().token(BOT_TOKEN).build()
   tg_app.add_handler(CommandHandler("start", start_command))
   tg_app.add_handler(MessageHandler(tg_filters.VIDEO, handle_video_upload))
@@ -687,7 +703,7 @@ def main():
   )
   tg_app.add_handler(CallbackQueryHandler(button_click))
 
-  print("DKLR TV Bot Dynamic Button Filter Active...")
+  print("DKLR TV Bot Engine Full Final Live...")
   tg_app.run_polling(close_loop=False)
 
 
