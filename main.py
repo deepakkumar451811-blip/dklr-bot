@@ -281,24 +281,36 @@ def match_show(caption):
   return None
 
 
+# ----------------- UNIVERSAL BRAND CLEANER -----------------
 def build_html_caption(raw_name):
-  cleaned_name = (
-      raw_name.replace("TvShowHub", "DKLRDR")
-      .replace("tvshowhub", "DKLRDR")
-      .replace("DKLR_DR", "DKLRDR")
-  )
-  cleaned_name = (
-      cleaned_name.replace("*", "")
+  clean_name = (
+      raw_name.replace("*", "")
       .replace("<", "&lt;")
       .replace(">", "&gt;")
       .strip()
   )
 
-  if not cleaned_name:
-    cleaned_name = "Episode_Video.DKLRDR.mp4"
+  # 1. Strip standard video extension if present
+  base_name = re.sub(
+      r"\.(mp4|mkv|avi|mov|webm|flv)$", "", clean_name, flags=re.IGNORECASE
+  )
+
+  # 2. Strip any trailing brand/channel tags (TvShowHub, ANTONi, DG_Contents, webdlbot, UtsavTV, etc)
+  base_name = re.sub(
+      r"[-_.\s]+(TvShowHub|ANTONi|webdlbot|DG_Contents|DG_Content|UtsavTV|Nx-DRM-DL|DS_Ottwebdlbot|kairax007|ottwebdlbot|DKLR_DR|DKLRDR)[-_.\s]*$",
+      "",
+      base_name,
+      flags=re.IGNORECASE,
+  )
+
+  # 3. Strip any leftover tag after last hyphen or underscore at the end
+  base_name = re.sub(r"[-_]+[a-zA-Z0-9]+$", "", base_name)
+
+  # 4. Attach Official Universal Brand Extension
+  final_filename = f"{base_name.strip('.-_')}.DKLRDR.mp4"
 
   return (
-      f"<b>{cleaned_name}</b>\n\n"
+      f"<b>{final_filename}</b>\n\n"
       "⚡️ <b>Join :-</b> [ <b>@DKLRDR</b> ]\n\n"
       '📌 <b>Join:</b> <a'
       ' href="https://t.me/+AT1UIPpK3c04MTk1">https://t.me/+AT1UIPpK3c04MTk1</a>\n\n'
@@ -364,7 +376,7 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     doc = video_col.find_one({"date": target_date})
     existing_shows = doc.get("shows", {}) if doc else {}
 
-    # DATABASE REPLACEMENT: Delete old & add new
+    # DATABASE OVERWRITE REPLACEMENT
     existing_shows[show_key] = [
         {"id": vid_data["id"], "raw_name": vid_data["raw_name"]}
     ]
@@ -401,7 +413,6 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     doc = video_col.find_one({"date": target_date})
     existing_shows = doc.get("shows", {}) if doc else {}
 
-    # Group incoming videos by show_key
     new_uploads_grouped = {}
 
     for vid in pending:
@@ -416,11 +427,10 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
           {"id": vid["id"], "raw_name": vid["raw_name"]}
       )
 
-    # REPLACEMENT LOGIC: OVERWRITE OLD VIDEOS IN DATABASE FOR MATCHED SHOWS
     for key, vids in new_uploads_grouped.items():
       if key in existing_shows and len(existing_shows[key]) > 0:
         replaced_count += len(existing_shows[key])
-      existing_shows[key] = vids  # Overwrite with latest batch
+      existing_shows[key] = vids  # Overwrite old batch in DB
       auto_saved += len(vids)
 
     if auto_saved > 0:
@@ -565,7 +575,6 @@ async def button_click(update: Update, context: ContextTypes.DEFAULT_TYPE):
   elif data.startswith("ott_") or data.endswith("_p1"):
     all_shows = get_all_shows()
 
-    # DYNAMIC FILTER: Show only buttons which have videos for 'user_date'
     doc = video_col.find_one({"date": user_date})
     uploaded_shows_dict = doc.get("shows", {}) if doc else {}
 
@@ -641,9 +650,9 @@ async def button_click(update: Update, context: ContextTypes.DEFAULT_TYPE):
       )
       sent_messages.append(sent_notice.message_id)
 
-      # ----------------- 60 MINUTE CHAT AUTO-DELETE TIMER -----------------
+      # 60 Minute Chat Auto-Delete Timer
       async def auto_delete_task(chat_id, msg_ids):
-        await asyncio.sleep(3600)  # 3600 seconds = 60 mins
+        await asyncio.sleep(3600)  # 60 mins
         for mid in msg_ids:
           try:
             await context.bot.delete_message(chat_id=chat_id, message_id=mid)
@@ -651,7 +660,6 @@ async def button_click(update: Update, context: ContextTypes.DEFAULT_TYPE):
             pass
 
       asyncio.create_task(auto_delete_task(query.message.chat_id, sent_messages))
-      # ---------------------------------------------------------------------
 
     else:
       disp_date = user_date.title() if user_date else "Selected Date"
@@ -703,7 +711,7 @@ def main():
   )
   tg_app.add_handler(CallbackQueryHandler(button_click))
 
-  print("DKLR TV Bot Engine Full Final Live...")
+  print("DKLR TV Bot Universal Cleaner Live...")
   tg_app.run_polling(close_loop=False)
 
 
