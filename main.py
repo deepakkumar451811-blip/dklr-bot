@@ -1,11 +1,13 @@
 import asyncio
 from datetime import datetime
+import io
 import os
 import re
 from threading import Thread
 from flask import Flask
 import pymongo
 from pyrogram import Client, filters
+import requests
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
 from telegram.ext import (
     ApplicationBuilder,
@@ -52,6 +54,21 @@ TARGET_BOT_USERNAME = "@autofiltertsh_bot"
 SOURCE_CHANNELS = ["tvshowhubb"]
 
 OWNER_USERNAME = "dklr145"
+
+# 🖼️ AAPKA DIRECT THUMBNAIL LINK
+CUSTOM_THUMBNAIL_URL = os.environ.get(
+    "CUSTOM_THUMBNAIL", "https://i.ibb.co/Fq5kQM1K/1785767623398.png"
+)
+
+# Cache Thumbnail Bytes in Memory
+THUMB_BYTES = None
+try:
+  res = requests.get(CUSTOM_THUMBNAIL_URL, timeout=10)
+  if res.status_code == 200:
+    THUMB_BYTES = res.content
+    print("✅ Custom Thumbnail Loaded Successfully!")
+except Exception as err:
+  print(f"⚠️ Thumbnail Fetch Failed: {err}")
 
 client = pymongo.MongoClient(MONGO_URI)
 db = client["dklr_bot_db"]
@@ -389,7 +406,7 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
   text = update.message.text.strip()
 
-  # 1. Handling Manual Show Title Input (Single/Group)
+  # 1. Handling Manual Show Title Input
   if context.user_data.get("adding_manual_show"):
     target_date = context.user_data.get("manual_date")
     ott_tag = context.user_data.get("manual_ott")
@@ -560,7 +577,6 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     clean_user_input = re.sub(r"^0(\d)", r"\1", user_input_date)
     clean_today = re.sub(r"^0(\d)", r"\1", today_fmt1)
 
-    # BLOCK TODAY'S EPISODE FOR REGULAR USERS (EXCEPT OWNER @dklr145)
     if (
         clean_user_input == clean_today
         or user_input_date in [today_fmt1, today_fmt2]
@@ -744,12 +760,18 @@ async def button_click(update: Update, context: ContextTypes.DEFAULT_TYPE):
         r_name = vid_obj.get("raw_name", "Episode_Video.DKLRShowhub.mp4")
         fresh_caption = build_html_caption(r_name)
 
-        sent_vid = await context.bot.send_video(
-            chat_id=query.message.chat_id,
-            video=vid_obj["id"],
-            caption=fresh_caption,
-            parse_mode="HTML",
-        )
+        send_kwargs = {
+            "chat_id": query.message.chat_id,
+            "video": vid_obj["id"],
+            "caption": fresh_caption,
+            "parse_mode": "HTML",
+        }
+
+        # Send Custom Thumbnail Bytes as InputFile to Force Override Video Thumbnail
+        if THUMB_BYTES:
+          send_kwargs["thumbnail"] = io.BytesIO(THUMB_BYTES)
+
+        sent_vid = await context.bot.send_video(**send_kwargs)
         sent_messages.append(sent_vid.message_id)
 
       notice_text = (
