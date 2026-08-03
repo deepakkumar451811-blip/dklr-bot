@@ -1,4 +1,6 @@
+Python
 import asyncio
+from datetime import datetime
 import os
 import re
 from threading import Thread
@@ -292,12 +294,10 @@ def build_html_caption(raw_name):
       .strip()
   )
 
-  # 1. Video extension hatayein (.mp4, .mkv etc)
   base_name = re.sub(
       r"\.(mp4|mkv|avi|mov|webm|flv)$", "", clean_name, flags=re.IGNORECASE
   )
 
-  # 2. Promotional/Source tags hatayein
   base_name = re.sub(
       r"[-_.\s]+(TvShowHub|ANTONi|webdlbot|DG_Contents|DG_Content|UtsavTV|Nx-DRM-DL|DS_Ottwebdlbot|kairax007|ottwebdlbot|DKLR_DR|DKLRDR|DKLRShowhub)[-_.\s]*$",
       "",
@@ -305,13 +305,10 @@ def build_html_caption(raw_name):
       flags=re.IGNORECASE,
   )
 
-  # 3. Extra trailing hyphens/underscores hatayein
   base_name = re.sub(r"[-_]+[a-zA-Z0-9]+$", "", base_name)
 
-  # 4. Attach Updated Official Brand Extension
   final_filename = f"{base_name.strip('.-_')}.DKLRShowhub.mp4"
 
-  # 5. Exact Requested Format Caption
   return (
       f"<b>{final_filename}</b>\n\n"
       "⚡️ <b>Join :-</b> [ <b>@DKLRShowhub</b> ]\n\n"
@@ -325,7 +322,7 @@ def build_html_caption(raw_name):
 async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
   if update.message:
     await update.message.reply_text(
-        "<b>नमस्ते भाई! कृपया कोई तारीख लिखकर भेजें (जैसे: 28 July 2026)।</b>",
+        "<b>नमस्ते भाई! कृपया कोई तारीख लिखकर भेजें (जैसे: 02 August 2026)।</b>",
         parse_mode="HTML",
     )
 
@@ -351,7 +348,7 @@ async def handle_video_upload(
     total_rec = len(context.user_data["pending_videos"])
     await update.message.reply_text(
         f"🎥 <b>वीडियो प्राप्त हो गई! (कुल: {total_rec})</b>\n\n"
-        "✍️ <b>कृपया तारीख लिखकर भेजें (जैसे: 28 July 2026):</b>",
+        "✍️ <b>कृपया तारीख लिखकर भेजें (जैसे: 02 August 2026):</b>",
         parse_mode="HTML",
     )
 
@@ -376,7 +373,9 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         upsert=True,
     )
 
-    doc = video_col.find_one({"date": target_date})
+    doc = video_col.find_one(
+        {"date": {"$regex": f"^{target_date}$", "$options": "i"}}
+    )
     existing_shows = doc.get("shows", {}) if doc else {}
 
     existing_shows[show_key] = [
@@ -384,11 +383,11 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     ]
 
     if not doc:
-      video_col.insert_one({"date": target_date, "shows": existing_shows})
-    else:
-      video_col.update_one(
-          {"date": target_date}, {"$set": {"shows": existing_shows}}
+      video_col.insert_one(
+          {"date": target_date.lower(), "shows": existing_shows}
       )
+    else:
+      video_col.update_one({"_id": doc["_id"]}, {"$set": {"shows": existing_shows}})
 
     context.user_data["adding_manual_show"] = False
     await update.message.reply_text(
@@ -402,7 +401,7 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     return
 
   if context.user_data.get("awaiting_upload_date"):
-    target_date = text.lower()
+    target_date = text.lower().strip()
     context.user_data["awaiting_upload_date"] = False
 
     pending = context.user_data.get("pending_videos", [])
@@ -412,7 +411,9 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     replaced_count = 0
     unmatched_list = []
 
-    doc = video_col.find_one({"date": target_date})
+    doc = video_col.find_one(
+        {"date": {"$regex": f"^{target_date}$", "$options": "i"}}
+    )
     existing_shows = doc.get("shows", {}) if doc else {}
 
     new_uploads_grouped = {}
@@ -440,7 +441,8 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         video_col.insert_one({"date": target_date, "shows": existing_shows})
       else:
         video_col.update_one(
-            {"date": target_date}, {"$set": {"shows": existing_shows}}
+            {"_id": doc["_id"]},
+            {"$set": {"date": target_date, "shows": existing_shows}},
         )
 
     msg = f"✅ <b>तारीख सेट हो गई:</b> <b>{target_date.title()}</b>\n\n"
@@ -449,8 +451,10 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
 
     if replaced_count > 0:
-      msg += f"🔄 <b>पुराने डेटाबेस से रिप्लेस (Delete & Update) किए गए:</b>"
-      f" <b>{replaced_count} वीडियोस</b>\n"
+      msg += (
+          f"🔄 <b>पुराने डेटाबेस से रिप्लेस किए गए:</b>"
+          f" <b>{replaced_count} वीडियोस</b>\n"
+      )
 
     await update.message.reply_text(msg, parse_mode="HTML")
 
@@ -499,7 +503,38 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
       "december",
   ]
   if any(m in text.lower() for m in months) and re.search(r"\d+", text):
-    context.user_data["selected_date"] = text.lower()
+    user_input_date = text.lower().strip()
+
+    # Today's Date Check
+    today_dt = datetime.now()
+    today_fmt1 = today_dt.strftime("%d %B %Y").lower()  # e.g. 03 august 2026
+    today_fmt2 = today_dt.strftime("%-d %B %Y").lower()  # e.g. 3 august 2026
+
+    # Normalize single digit days (03 August 2026 vs 3 August 2026)
+    clean_user_input = re.sub(
+        r"^0(\d)", r"\1", user_input_date
+    )  # converts 03 -> 3
+    clean_today1 = re.sub(r"^0(\d)", r"\1", today_fmt1)
+
+    if clean_user_input == clean_today1:
+      channel_btn = InlineKeyboardMarkup([[
+          InlineKeyboardButton(
+              "🚀 Main Channel", url="https://t.me/+AT1UIPpK3c04MTk1"
+          )
+      ]])
+      await update.message.reply_text(
+          "🚫 <b>Sorry! You cannot watch today's episode here.</b>\n"
+          "👉 <b>Please go to our Main Channel and watch today's episode from"
+          " there.</b>\n\n"
+          "🚫 <b>माफ़ कीजिए! आप आज की एपिसोड यहां नहीं देख सकते।</b>\n"
+          "👉 <b>कृपया हमारे मुख्य चैनल पर जाएं और आज की एपिसोड वहां"
+          " देखें।</b>",
+          reply_markup=channel_btn,
+          parse_mode="HTML",
+      )
+      return
+
+    context.user_data["selected_date"] = user_input_date
     buttons = [
         [InlineKeyboardButton("SunNXT", callback_data="sunnxt_p1")],
         [InlineKeyboardButton("Zee5", callback_data="zee5_p1")],
@@ -526,7 +561,20 @@ async def button_click(update: Update, context: ContextTypes.DEFAULT_TYPE):
   await query.answer()
 
   data = query.data
-  user_date = context.user_data.get("selected_date", "")
+
+  # Read selected_date or extract directly from current text if missing
+  user_date = context.user_data.get("selected_date", "").strip().lower()
+
+  if not user_date and query.message and query.message.text:
+    match = re.search(
+        r"Date Requested:\s*\n*(.+)", query.message.text, re.IGNORECASE
+    )
+    if not match:
+      match = re.search(
+          r"Chosen Date:\s*<b>(.+?)</b>", query.message.text, re.IGNORECASE
+      )
+    if match:
+      user_date = match.group(1).strip().lower()
 
   if data.startswith("addmanual_"):
     parts = data.split("_")
@@ -577,7 +625,11 @@ async def button_click(update: Update, context: ContextTypes.DEFAULT_TYPE):
   elif data.startswith("ott_") or data.endswith("_p1"):
     all_shows = get_all_shows()
 
-    doc = video_col.find_one({"date": user_date})
+    # Case-insensitive Database Search
+    doc = video_col.find_one(
+        {"date": {"$regex": f"^{user_date}$", "$options": "i"}}
+    )
+
     uploaded_shows_dict = doc.get("shows", {}) if doc else {}
 
     show_buttons = []
@@ -618,7 +670,12 @@ async def button_click(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
   elif data.startswith("show_"):
     show_key = data.replace("show_", "")
-    doc = video_col.find_one({"date": user_date})
+
+    # Case-insensitive Database Search
+    doc = video_col.find_one(
+        {"date": {"$regex": f"^{user_date}$", "$options": "i"}}
+    )
+
     date_db = doc.get("shows", {}) if doc else {}
     video_list = date_db.get(show_key, [])
 
