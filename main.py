@@ -381,10 +381,11 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
   text = update.message.text.strip()
 
+  # 1. Handling Group/Single Manual Show Title Input
   if context.user_data.get("adding_manual_show"):
-    vid_data = context.user_data.get("manual_vid")
     target_date = context.user_data.get("manual_date")
     ott_tag = context.user_data.get("manual_ott")
+    vid_list = context.user_data.get("manual_vid_list", [])
 
     show_name = text.title()
     show_key = show_name.lower().replace(" ", "_")
@@ -398,9 +399,13 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     doc = find_db_doc_by_date(target_date)
     existing_shows = doc.get("shows", {}) if doc else {}
 
-    existing_shows[show_key] = [
-        {"id": vid_data["id"], "raw_name": vid_data["raw_name"]}
-    ]
+    if show_key not in existing_shows:
+      existing_shows[show_key] = []
+
+    for v in vid_list:
+      existing_shows[show_key].append(
+          {"id": v["id"], "raw_name": v["raw_name"]}
+      )
 
     if not doc:
       video_col.insert_one(
@@ -411,15 +416,18 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     context.user_data["adding_manual_show"] = False
     await update.message.reply_text(
-        f"✅ <b>नया शो सफ़लतापूर्वक ऐड हो गया!</b>\n\n"
+        f"✅ <b>नया शो सफ़लतापूर्वक ऐडेड!</b>\n\n"
         f"🎬 <b>Show Name:</b> {show_name}\n"
         f"📺 <b>OTT:</b> {ott_tag.split('_')[0].upper()}\n"
+        f"📁 <b>Total Files Saved:</b> {len(vid_list)} Videos (All"
+        " Quality)\n"
         f"📅 <b>Date:</b> {target_date.title()}\n\n"
-        "🎉 <b>पुराना डेटा रिप्लेस होकर नया बटन बन गया है!</b>",
+        "🎉 <b>अब ये सभी वीडियोस इस एक शो के बटन में खुलेंगी!</b>",
         parse_mode="HTML",
     )
     return
 
+  # 2. Handling Date Entry After Video Upload
   if context.user_data.get("awaiting_upload_date"):
     target_date = text.lower().strip()
     context.user_data["awaiting_upload_date"] = False
@@ -454,18 +462,17 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
       existing_shows[key] = vids
       auto_saved += len(vids)
 
-    if auto_saved > 0:
-      if not doc:
-        video_col.insert_one({"date": target_date, "shows": existing_shows})
-      else:
-        video_col.update_one(
-            {"_id": doc["_id"]},
-            {"$set": {"date": target_date, "shows": existing_shows}},
-        )
+    if not doc:
+      video_col.insert_one({"date": target_date, "shows": existing_shows})
+    else:
+      video_col.update_one(
+          {"_id": doc["_id"]},
+          {"$set": {"date": target_date, "shows": existing_shows}},
+      )
 
     msg = f"✅ <b>तारीख सेट हो गई:</b> <b>{target_date.title()}</b>\n\n"
     msg += (
-        f"🤖 <b>सफलतापूर्वक नए शो में सेव हुए:</b> <b>{auto_saved} वीडियोस</b>\n"
+        f"🤖 <b>सफलतापूर्वक ऑटो-मैच हुए:</b> <b>{auto_saved} वीडियोस</b>\n"
     )
 
     if replaced_count > 0:
@@ -476,36 +483,49 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     await update.message.reply_text(msg, parse_mode="HTML")
 
+    # Render Unmatched Shows Section with ALL-IN-ONE Button
     if unmatched_list:
-      await update.message.reply_text(
-          f"🚨 <b>कुल {len(unmatched_list)} अनमैच शोज़ मिले हैं!</b>\n"
-          "कृपया नीचे एक-एक करके शो का बटन बनाने के लिए बटन दबाएँ:",
-          parse_mode="HTML",
-      )
+      det_ott = detect_ott_tag(unmatched_list[0]["raw_name"])
+      clean_date_tag = target_date.replace(" ", "_")
+
+      context.user_data["unmatched_all_list"] = unmatched_list
+
+      buttons = [
+          [
+              InlineKeyboardButton(
+                  f"➕ Add All ({len(unmatched_list)}) Quality Files to ONE Show",
+                  callback_data=f"addm_all|{clean_date_tag}|{det_ott}",
+              )
+          ]
+      ]
 
       for idx, u_vid in enumerate(unmatched_list):
         auto_suggested = extract_show_title_auto(u_vid["raw_name"])
-        det_ott = detect_ott_tag(u_vid["raw_name"])
-
-        btn = InlineKeyboardMarkup([[
+        buttons.append([
             InlineKeyboardButton(
-                f"➕ Add Show #{idx+1} Button",
-                callback_data=f"addmanual_{target_date}_{det_ott}_{idx}",
+                f"➕ Add Only File #{idx+1} Separately",
+                callback_data=f"addm_single|{clean_date_tag}|{det_ott}|{idx}",
             )
-        ]])
+        ])
 
-        context.user_data[f"unmatch_{idx}"] = u_vid
-
-        await update.message.reply_text(
-            f"❓ <b>Unmatched Show #{idx+1}:</b>\n"
-            f"📄 <b>File Name:</b> <code>{u_vid['raw_name']}</code>\n"
-            f"💡 <b>Suggested Title:</b> <b>{auto_suggested}</b>\n"
-            f"📺 <b>Target OTT:</b> <b>{det_ott.split('_')[0].upper()}</b>",
-            reply_markup=btn,
-            parse_mode="HTML",
+      unmatch_info = f"🚨 <b>कुल {len(unmatched_list)} अनमैच फाइल्स मिली हैं!</b>\n\n"
+      for idx, u in enumerate(unmatched_list):
+        unmatch_info += (
+            f"📄 <b>File #{idx+1}:</b> <code>{u['raw_name']}</code>\n"
         )
+
+      unmatch_info += (
+          "\n👇 <b>इन सभी वीडियोस को एक ही शो में ऐड करने के लिए पहला बटन दबाएँ:</b>"
+      )
+
+      await update.message.reply_text(
+          unmatch_info,
+          reply_markup=InlineKeyboardMarkup(buttons),
+          parse_mode="HTML",
+      )
     return
 
+  # 3. User Searching Date
   months = [
       "january",
       "february",
@@ -554,7 +574,6 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
       )
       return
 
-    # User ke chat state mein date save karein
     context.user_data["active_date"] = user_input_date
 
     buttons = [
@@ -588,27 +607,62 @@ async def button_click(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await query.message.delete()
     return
 
-  elif data.startswith("addmanual_"):
-    parts = data.split("_")
-    t_date = parts[1]
-    t_ott = f"{parts[2]}_{parts[3]}"
-    idx = parts[4]
+  elif data.startswith("addm_all|"):
+    _, clean_date_tag, det_ott = data.split("|")
+    target_date = clean_date_tag.replace("_", " ")
 
-    u_vid = context.user_data.get(f"unmatch_{idx}")
-    context.user_data["manual_vid"] = u_vid
-    context.user_data["manual_date"] = t_date
-    context.user_data["manual_ott"] = t_ott
+    unmatched_list = context.user_data.get("unmatched_all_list", [])
+
+    context.user_data["manual_vid_list"] = unmatched_list
+    context.user_data["manual_date"] = target_date
+    context.user_data["manual_ott"] = det_ott
     context.user_data["adding_manual_show"] = True
 
     await query.message.reply_text(
-        f"✍️ <b>कृपया इस शो का सही नाम लिखकर भेजें:</b>\n"
-        f"📄 File: <code>{u_vid['raw_name']}</code>\n\n"
-        "<i>आपके नाम भेजते ही बॉट इसका ऑटोमैटिक बटन बनाकर ऐड कर देगा!</i>",
+        f"✍️ <b>कृपया इन सभी {len(unmatched_list)} वीडियोस के शो का सही नाम लिखकर भेजें:</b>\n\n"
+        "<i>आपके नाम भेजते ही बॉट यह सभी क्वालिटी वीडियोस एक ही शो के बटन में ऐड कर देगा!</i>",
         parse_mode="HTML",
     )
     return
 
-  # Date Extracting from Chat Context or Message Text
+  elif data.startswith("addm_single|"):
+    _, clean_date_tag, det_ott, idx = data.split("|")
+    target_date = clean_date_tag.replace("_", " ")
+
+    unmatched_list = context.user_data.get("unmatched_all_list", [])
+    single_vid = unmatched_list[int(idx)]
+
+    context.user_data["manual_vid_list"] = [single_vid]
+    context.user_data["manual_date"] = target_date
+    context.user_data["manual_ott"] = det_ott
+    context.user_data["adding_manual_show"] = True
+
+    await query.message.reply_text(
+        f"✍️ <b>कृपया इन सभी {len(unmatched_list)} वीडियोस के शो का सही नाम लिखकर भेजें:</b>\n\n"
+        "<i>आपके नाम भेजते ही बॉट यह सभी क्वालिटी वीडियोस एक ही शो के बटन में ऐड कर देगा!</i>",
+        parse_mode="HTML",
+    )
+    return
+
+  elif data.startswith("addm_single|"):
+    _, clean_date_tag, det_ott, idx = data.split("|")
+    target_date = clean_date_tag.replace("_", " ")
+
+    unmatched_list = context.user_data.get("unmatched_all_list", [])
+    single_vid = unmatched_list[int(idx)]
+
+    context.user_data["manual_vid_list"] = [single_vid]
+    context.user_data["manual_date"] = target_date
+    context.user_data["manual_ott"] = det_ott
+    context.user_data["adding_manual_show"] = True
+
+    await query.message.reply_text(
+        f"✍️ <b>कृपया इस सिंगल फाइल का सही नाम लिखकर भेजें:</b>\n"
+        f"📄 File: <code>{single_vid['raw_name']}</code>",
+        parse_mode="HTML",
+    )
+    return
+
   user_date = context.user_data.get("active_date", "")
 
   if not user_date and query.message and query.message.text:
