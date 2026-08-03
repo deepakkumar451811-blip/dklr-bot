@@ -4,10 +4,10 @@ import io
 import os
 import re
 from threading import Thread
+from PIL import Image
 from flask import Flask
 import pymongo
 from pyrogram import Client, filters
-import requests
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
 from telegram.ext import (
     ApplicationBuilder,
@@ -55,20 +55,16 @@ SOURCE_CHANNELS = ["tvshowhubb"]
 
 OWNER_USERNAME = "dklr145"
 
-# 🖼️ AAPKA DIRECT THUMBNAIL LINK
-CUSTOM_THUMBNAIL_URL = os.environ.get(
-    "CUSTOM_THUMBNAIL", "https://i.ibb.co/Fq5kQM1K/1785767623398.png"
-)
-
-# Cache Thumbnail Bytes in Memory
+# 🖤 CREATE CLEAN BLACK THUMBNAIL (TO HIDE OLD WATERMARK)
 THUMB_BYTES = None
 try:
-  res = requests.get(CUSTOM_THUMBNAIL_URL, timeout=10)
-  if res.status_code == 200:
-    THUMB_BYTES = res.content
-    print("✅ Custom Thumbnail Loaded Successfully!")
+  clean_img = Image.new("RGB", (320, 240), color=(15, 15, 18))
+  out_buf = io.BytesIO()
+  clean_img.save(out_buf, format="JPEG", quality=90)
+  THUMB_BYTES = out_buf.getvalue()
+  print("✅ Clean Black Thumbnail Generated Successfully!")
 except Exception as err:
-  print(f"⚠️ Thumbnail Fetch Failed: {err}")
+  print(f"⚠️ Clean Thumbnail Error: {err}")
 
 client = pymongo.MongoClient(MONGO_URI)
 db = client["dklr_bot_db"]
@@ -767,9 +763,11 @@ async def button_click(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "parse_mode": "HTML",
         }
 
-        # Send Custom Thumbnail Bytes as InputFile to Force Override Video Thumbnail
+        # Force Override with Clean JPEG Thumbnail Bytes
         if THUMB_BYTES:
-          send_kwargs["thumbnail"] = io.BytesIO(THUMB_BYTES)
+          thumb_file = io.BytesIO(THUMB_BYTES)
+          thumb_file.name = "thumb.jpg"
+          send_kwargs["thumbnail"] = thumb_file
 
         sent_vid = await context.bot.send_video(**send_kwargs)
         sent_messages.append(sent_vid.message_id)
