@@ -58,9 +58,10 @@ db = client["dklr_bot_db"]
 video_col = db["videos"]
 shows_col = db["custom_shows"]
 
-# ----------------- MASTER SHOWS DATABASE -----------------
+# ----------------- MASTER SHOWS DATABASE (EXACT 47 SHOWS) -----------------
 DEFAULT_SHOWS = {
-    # HOTSTAR
+    # HOTSTAR (20 SHOWS)
+    "shivmay_shravan": {"name": "Shivmay Shravan", "ott": "hotstar_p1"},
     "binddii": {"name": "Binddii", "ott": "hotstar_p1"},
     "oh_humnava": {
         "name": "Oh Humnava - Tum Dena Saath Mera",
@@ -92,7 +93,7 @@ DEFAULT_SHOWS = {
         "name": "Laughter Chefs Unlimited Entertainment",
         "ott": "hotstar_p1",
     },
-    # ZEE5
+    # ZEE5 (9 SHOWS)
     "tu_hi_re": {"name": "Tu Hi Re Dil Mein", "ott": "zee5_p1"},
     "lakshmi_nivas": {"name": "Lakshmi Nivas", "ott": "zee5_p1"},
     "tumm_se_tumm": {"name": "Tumm Se Tumm Tak", "ott": "zee5_p1"},
@@ -102,7 +103,7 @@ DEFAULT_SHOWS = {
     "jagadhatri": {"name": "Jagadhatri", "ott": "zee5_p1"},
     "jaane_anjaane": {"name": "Jaane Anjaane Hum Mile", "ott": "zee5_p1"},
     "greatest_show": {"name": "The Greatest Show on Earth", "ott": "zee5_p1"},
-    # DANGAL PLAY
+    # DANGAL PLAY (8 SHOWS)
     "pati_anaadi": {"name": "PATI ANAADI", "ott": "dangal_p1"},
     "pati_bhramachari": {"name": "PATI BHRAMACHARI", "ott": "dangal_p1"},
     "mann_atisundar": {"name": "MANN ATISUNDAR", "ott": "dangal_p1"},
@@ -111,7 +112,7 @@ DEFAULT_SHOWS = {
     "tees_ke_paar": {"name": "TEES KE PAAR JAB MILA PYAR", "ott": "dangal_p1"},
     "kaisi_teri": {"name": "KAISI TERI DILLAGI", "ott": "dangal_p1"},
     "mann_sundar": {"name": "MANN SUNDAR", "ott": "dangal_p1"},
-    # SONYLIV
+    # SONYLIV (8 SHOWS)
     "hui_gumm": {
         "name": "Hui Gumm Yaadein Ek Doctor Do Zindagiyaan",
         "ott": "sonyliv_p1",
@@ -122,7 +123,8 @@ DEFAULT_SHOWS = {
     "pushpa": {"name": "Pushpa Impossible", "ott": "sonyliv_p1"},
     "indian_idol": {"name": "Indian Idol", "ott": "sonyliv_p1"},
     "ibd": {"name": "India's Best Dancer", "ott": "sonyliv_p1"},
-    # SUNNXT
+    "kkk": {"name": "Khatron Ke Khiladi", "ott": "sonyliv_p1"},
+    # SUNNXT (2 SHOWS)
     "thodi_si_umeed": {
         "name": "Thodi Si Umeed Thoda Sa Aasman",
         "ott": "sunnxt_p1",
@@ -237,6 +239,9 @@ def extract_show_title_auto(raw_name):
 def match_show(caption):
   clean_caption = caption.replace("_", " ").replace(".", " ").lower()
 
+  if "shivmay" in clean_caption or "shravan" in clean_caption:
+    return "shivmay_shravan"
+
   exact_map = {
       # Dangal
       "mann sundar": "mann_sundar",
@@ -248,6 +253,7 @@ def match_show(caption):
       "tees ke paar": "tees_ke_paar",
       "kaisi teri": "kaisi_teri",
       # Hotstar
+      "shivmay": "shivmay_shravan",
       "parshuram": "parshuram",
       "sairaab": "sairaab",
       "oh humnava": "oh_humnava",
@@ -258,7 +264,8 @@ def match_show(caption):
       "juhi mui": "juhi_mui",
       "anupama": "anupama",
       "bareilly": "bareilly",
-      "mahadev": "mahadev",
+      "mahadev & sons": "mahadev",
+      "mahadev and sons": "mahadev",
       "seher hone": "seher",
       "fevicreate": "fevicreate",
       "udne ki": "udne_ki_aasha",
@@ -289,6 +296,7 @@ def match_show(caption):
       "pushpa": "pushpa",
       "indian idol": "indian_idol",
       "best dancer": "ibd",
+      "khatron ke khiladi": "kkk",
       # SunNXT
       "divya prem": "divya_prem",
       "thodi si umeed": "thodi_si_umeed",
@@ -381,7 +389,7 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
   text = update.message.text.strip()
 
-  # 1. Handling Group/Single Manual Show Title Input
+  # 1. Handling Manual Show Title Input (Single/Group)
   if context.user_data.get("adding_manual_show"):
     target_date = context.user_data.get("manual_date")
     ott_tag = context.user_data.get("manual_ott")
@@ -483,7 +491,6 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     await update.message.reply_text(msg, parse_mode="HTML")
 
-    # Render Unmatched Shows Section with ALL-IN-ONE Button
     if unmatched_list:
       det_ott = detect_ott_tag(unmatched_list[0]["raw_name"])
       clean_date_tag = target_date.replace(" ", "_")
@@ -553,6 +560,7 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     clean_user_input = re.sub(r"^0(\d)", r"\1", user_input_date)
     clean_today = re.sub(r"^0(\d)", r"\1", today_fmt1)
 
+    # BLOCK TODAY'S EPISODE FOR REGULAR USERS (EXCEPT OWNER @dklr145)
     if (
         clean_user_input == clean_today
         or user_input_date in [today_fmt1, today_fmt2]
@@ -614,25 +622,6 @@ async def button_click(update: Update, context: ContextTypes.DEFAULT_TYPE):
     unmatched_list = context.user_data.get("unmatched_all_list", [])
 
     context.user_data["manual_vid_list"] = unmatched_list
-    context.user_data["manual_date"] = target_date
-    context.user_data["manual_ott"] = det_ott
-    context.user_data["adding_manual_show"] = True
-
-    await query.message.reply_text(
-        f"✍️ <b>कृपया इन सभी {len(unmatched_list)} वीडियोस के शो का सही नाम लिखकर भेजें:</b>\n\n"
-        "<i>आपके नाम भेजते ही बॉट यह सभी क्वालिटी वीडियोस एक ही शो के बटन में ऐड कर देगा!</i>",
-        parse_mode="HTML",
-    )
-    return
-
-  elif data.startswith("addm_single|"):
-    _, clean_date_tag, det_ott, idx = data.split("|")
-    target_date = clean_date_tag.replace("_", " ")
-
-    unmatched_list = context.user_data.get("unmatched_all_list", [])
-    single_vid = unmatched_list[int(idx)]
-
-    context.user_data["manual_vid_list"] = [single_vid]
     context.user_data["manual_date"] = target_date
     context.user_data["manual_ott"] = det_ott
     context.user_data["adding_manual_show"] = True
