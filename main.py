@@ -55,14 +55,14 @@ SOURCE_CHANNELS = ["tvshowhubb"]
 
 OWNER_USERNAME = "dklr145"
 
-# 🖤 CREATE CLEAN BLACK THUMBNAIL (TO HIDE OLD WATERMARK)
+# 🖤 CLEAN BLACK THUMBNAIL TO HIDE OLD WATERMARK
 THUMB_BYTES = None
 try:
   clean_img = Image.new("RGB", (320, 240), color=(15, 15, 18))
   out_buf = io.BytesIO()
   clean_img.save(out_buf, format="JPEG", quality=90)
   THUMB_BYTES = out_buf.getvalue()
-  print("✅ Clean Black Thumbnail Generated Successfully!")
+  print("✅ Clean Black Thumbnail Generated!")
 except Exception as err:
   print(f"⚠️ Clean Thumbnail Error: {err}")
 
@@ -70,6 +70,7 @@ client = pymongo.MongoClient(MONGO_URI)
 db = client["dklr_bot_db"]
 video_col = db["videos"]
 shows_col = db["custom_shows"]
+ott_col = db["custom_otts"]
 
 # ----------------- MASTER SHOWS DATABASE (EXACT 47 SHOWS) -----------------
 DEFAULT_SHOWS = {
@@ -154,6 +155,20 @@ def get_all_shows():
   return shows
 
 
+def get_all_otts():
+  default_otts = [
+      ("SunNXT", "sunnxt_p1"),
+      ("Zee5", "zee5_p1"),
+      ("DangalPlay", "dangal_p1"),
+      ("Hotstar(StarPlus & Colors)", "hotstar_p1"),
+      ("SonyLiv", "sonyliv_p1"),
+  ]
+  customs = ott_col.find()
+  for c in customs:
+    default_otts.append((c["name"], c["tag"]))
+  return default_otts
+
+
 def find_db_doc_by_date(date_str):
   if not date_str:
     return None
@@ -221,32 +236,6 @@ def detect_ott_tag(caption):
   elif "SUNNXT" in text or ".SN." in text:
     return "sunnxt_p1"
   return "hotstar_p1"
-
-
-def extract_show_title_auto(raw_name):
-  clean = (
-      raw_name.replace("TvShowHub", "")
-      .replace("tvshowhub", "")
-      .replace("DKLRShowhub", "")
-      .replace("DKLRDR", "")
-  )
-  clean_text = clean.replace(".", " ").replace("_", " ")
-
-  parts = clean_text.split()
-  title_parts = []
-  for p in parts:
-    if re.search(
-        r"^(Season|Episode|Ep|E\d+|\d+p|Web|Dl|AAC|H|264|DangalPlay|Hotstar|Zee5|SonyLiv|SunNXT)",
-        p,
-        re.IGNORECASE,
-    ):
-      break
-    title_parts.append(p)
-
-  title_part = " ".join(title_parts).strip()
-  if not title_part or len(title_part) < 2:
-    title_part = "Show " + raw_name[:10]
-  return title_part.title()
 
 
 def match_show(caption):
@@ -364,8 +353,16 @@ def build_html_caption(raw_name):
 
 async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
   if update.message:
+    buttons = [
+        [
+            InlineKeyboardButton("➕ Add New Show", callback_data="btn_add_show"),
+            InlineKeyboardButton("➕ Add New OTT", callback_data="btn_add_ott"),
+        ]
+    ]
     await update.message.reply_text(
-        "<b>नमस्ते भाई! कृपया कोई तारीख लिखकर भेजें (जैसे: 01 August 2026)।</b>",
+        "<b>नमस्ते भाई! कृपया कोई तारीख लिखकर भेजें (जैसे: 01 August 2026)।</b>\n\n"
+        "👇 <b>नया शो या OTT प्लेटफॉर्म जोड़ने के लिए नीचे दिए बटन दबाएँ:</b>",
+        reply_markup=InlineKeyboardMarkup(buttons),
         parse_mode="HTML",
     )
 
@@ -402,7 +399,49 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
   text = update.message.text.strip()
 
-  # 1. Handling Manual Show Title Input
+  # 1. ADD NEW OTT NAME
+  if context.user_data.get("adding_new_ott_mode"):
+    ott_name = text.strip().title()
+    ott_tag = ott_name.lower().replace(" ", "") + "_p1"
+
+    ott_col.update_one(
+        {"tag": ott_tag}, {"$set": {"name": ott_name, "tag": ott_tag}}, upsert=True
+    )
+    context.user_data["adding_new_ott_mode"] = False
+    await update.message.reply_text(
+        f"✅ <b>नया OTT प्लेटफ़ॉर्म सफलतापूर्वक जोड़ा गया!</b>\n\n"
+        f"📺 <b>OTT Name:</b> {ott_name}\n"
+        f"🏷️ <b>Tag:</b> {ott_tag}\n\n"
+        "🎉 <b>अब यह OTT आपके सभी सर्च ऑप्शन्स में दिखाई देगा!</b>",
+        parse_mode="HTML",
+    )
+    return
+
+  # 2. ADD NEW SHOW DETAILS
+  if context.user_data.get("adding_new_show_step1"):
+    show_name = text.strip().title()
+    show_key = show_name.lower().replace(" ", "_")
+    context.user_data["temp_show_name"] = show_name
+    context.user_data["temp_show_key"] = show_key
+    context.user_data["adding_new_show_step1"] = False
+    context.user_data["adding_new_show_step2"] = True
+
+    all_otts = get_all_otts()
+    ott_buttons = []
+    for o_name, o_tag in all_otts:
+      ott_buttons.append(
+          [InlineKeyboardButton(o_name, callback_data=f"setott|{o_tag}")]
+      )
+
+    await update.message.reply_text(
+        f"🎬 <b>Show Name Saved:</b> {show_name}\n\n"
+        "👇 <b>अब कृपया इस शो के लिए OTT प्लेटफ़ॉर्म चुनें:</b>",
+        reply_markup=InlineKeyboardMarkup(ott_buttons),
+        parse_mode="HTML",
+    )
+    return
+
+  # 3. Handling Manual Show Title Input
   if context.user_data.get("adding_manual_show"):
     target_date = context.user_data.get("manual_date")
     ott_tag = context.user_data.get("manual_ott")
@@ -440,15 +479,14 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"✅ <b>नया शो सफ़लतापूर्वक ऐडेड!</b>\n\n"
         f"🎬 <b>Show Name:</b> {show_name}\n"
         f"📺 <b>OTT:</b> {ott_tag.split('_')[0].upper()}\n"
-        f"📁 <b>Total Files Saved:</b> {len(vid_list)} Videos (All"
-        " Quality)\n"
+        f"📁 <b>Total Files Saved:</b> {len(vid_list)} Videos\n"
         f"📅 <b>Date:</b> {target_date.title()}\n\n"
         "🎉 <b>अब ये सभी वीडियोस इस एक शो के बटन में खुलेंगी!</b>",
         parse_mode="HTML",
     )
     return
 
-  # 2. Handling Date Entry After Video Upload
+  # 4. Handling Date Entry After Video Upload
   if context.user_data.get("awaiting_upload_date"):
     target_date = text.lower().strip()
     context.user_data["awaiting_upload_date"] = False
@@ -510,32 +548,17 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
       context.user_data["unmatched_all_list"] = unmatched_list
 
-      buttons = [
-          [
-              InlineKeyboardButton(
-                  f"➕ Add All ({len(unmatched_list)}) Quality Files to ONE Show",
-                  callback_data=f"addm_all|{clean_date_tag}|{det_ott}",
-              )
-          ]
-      ]
+      buttons = [[
+          InlineKeyboardButton(
+              f"➕ Add All ({len(unmatched_list)}) Unmatched Files to ONE Show",
+              callback_data=f"addm_all|{clean_date_tag}|{det_ott}",
+          )
+      ]]
 
-      for idx, u_vid in enumerate(unmatched_list):
-        auto_suggested = extract_show_title_auto(u_vid["raw_name"])
-        buttons.append([
-            InlineKeyboardButton(
-                f"➕ Add Only File #{idx+1} Separately",
-                callback_data=f"addm_single|{clean_date_tag}|{det_ott}|{idx}",
-            )
-        ])
-
-      unmatch_info = f"🚨 <b>कुल {len(unmatched_list)} अनमैच फाइल्स मिली हैं!</b>\n\n"
-      for idx, u in enumerate(unmatched_list):
-        unmatch_info += (
-            f"📄 <b>File #{idx+1}:</b> <code>{u['raw_name']}</code>\n"
-        )
-
-      unmatch_info += (
-          "\n👇 <b>इन सभी वीडियोस को एक ही शो में ऐड करने के लिए पहला बटन दबाएँ:</b>"
+      unmatch_info = (
+          f"🚨 <b>कुल {len(unmatched_list)} अनमैच फाइल्स बची हैं!</b>\n\n"
+          f"👇 <b>इन सभी {len(unmatched_list)} फाइल्स को एक ही शो में ऐड करने के"
+          " लिए बटन दबाएँ:</b>"
       )
 
       await update.message.reply_text(
@@ -545,7 +568,7 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
       )
     return
 
-  # 3. User Searching Date
+  # 5. User Searching Date
   months = [
       "january",
       "february",
@@ -596,18 +619,12 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     context.user_data["active_date"] = user_input_date
 
-    buttons = [
-        [InlineKeyboardButton("SunNXT", callback_data="o|sunnxt_p1")],
-        [InlineKeyboardButton("Zee5", callback_data="o|zee5_p1")],
-        [InlineKeyboardButton("DangalPlay", callback_data="o|dangal_p1")],
-        [
-            InlineKeyboardButton(
-                "Hotstar(StarPlus & Colors)", callback_data="o|hotstar_p1"
-            )
-        ],
-        [InlineKeyboardButton("SonyLiv", callback_data="o|sonyliv_p1")],
-        [InlineKeyboardButton("❌ Close", callback_data="close")],
-    ]
+    all_otts = get_all_otts()
+    buttons = []
+    for o_name, o_tag in all_otts:
+      buttons.append([InlineKeyboardButton(o_name, callback_data=f"o|{o_tag}")])
+    buttons.append([InlineKeyboardButton("❌ Close", callback_data="close")])
+
     await update.message.reply_text(
         "✅ <b>Data fetched successfully!</b>\n\n"
         f"📅 <b>Date Requested:</b>\n<b>{text.title()}</b>\n\n"
@@ -627,6 +644,42 @@ async def button_click(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await query.message.delete()
     return
 
+  elif data == "btn_add_show":
+    context.user_data["adding_new_show_step1"] = True
+    await query.message.reply_text(
+        "✍️ <b>कृपया नए शो का नाम लिखकर भेजें:</b>", parse_mode="HTML"
+    )
+    return
+
+  elif data == "btn_add_ott":
+    context.user_data["adding_new_ott_mode"] = True
+    await query.message.reply_text(
+        "✍️ <b>कृपया नए OTT प्लेटफ़ॉर्म का नाम लिखकर भेजें (जैसे: JioCinema):</b>",
+        parse_mode="HTML",
+    )
+    return
+
+  elif data.startswith("setott|"):
+    ott_tag = data.split("|")[1]
+    show_name = context.user_data.get("temp_show_name")
+    show_key = context.user_data.get("temp_show_key")
+
+    shows_col.update_one(
+        {"key": show_key},
+        {"$set": {"key": show_key, "name": show_name, "ott": ott_tag}},
+        upsert=True,
+    )
+
+    context.user_data["adding_new_show_step2"] = False
+    await query.message.reply_text(
+        f"✅ <b>नया शो सफलतापूर्वक डेटाबेस में जोड़ा गया!</b>\n\n"
+        f"🎬 <b>Show Name:</b> {show_name}\n"
+        f"📺 <b>OTT Tag:</b> {ott_tag.split('_')[0].upper()}\n\n"
+        "🎉 <b>अब जब भी इस नाम का शो आएगा, बॉट इसे ऑटो-मैच कर लेगा!</b>",
+        parse_mode="HTML",
+    )
+    return
+
   elif data.startswith("addm_all|"):
     _, clean_date_tag, det_ott = data.split("|")
     target_date = clean_date_tag.replace("_", " ")
@@ -639,27 +692,8 @@ async def button_click(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data["adding_manual_show"] = True
 
     await query.message.reply_text(
-        f"✍️ <b>कृपया इन सभी {len(unmatched_list)} वीडियोस के शो का सही नाम लिखकर भेजें:</b>\n\n"
-        "<i>आपके नाम भेजते ही बॉट यह सभी क्वालिटी वीडियोस एक ही शो के बटन में ऐड कर देगा!</i>",
-        parse_mode="HTML",
-    )
-    return
-
-  elif data.startswith("addm_single|"):
-    _, clean_date_tag, det_ott, idx = data.split("|")
-    target_date = clean_date_tag.replace("_", " ")
-
-    unmatched_list = context.user_data.get("unmatched_all_list", [])
-    single_vid = unmatched_list[int(idx)]
-
-    context.user_data["manual_vid_list"] = [single_vid]
-    context.user_data["manual_date"] = target_date
-    context.user_data["manual_ott"] = det_ott
-    context.user_data["adding_manual_show"] = True
-
-    await query.message.reply_text(
-        f"✍️ <b>कृपया इस सिंगल फाइल का सही नाम लिखकर भेजें:</b>\n"
-        f"📄 File: <code>{single_vid['raw_name']}</code>",
+        f"✍️ <b>कृपया इन सभी {len(unmatched_list)} अनमैच वीडियोस के शो का सही नाम पढ़कर लिखकर भेजें:</b>\n\n"
+        "<i>नाम भेजते ही बॉट यह सभी वीडियोस एक ही शो के बटन में सेव कर देगा!</i>",
         parse_mode="HTML",
     )
     return
@@ -721,18 +755,12 @@ async def button_click(update: Update, context: ContextTypes.DEFAULT_TYPE):
       )
 
   elif data == "b_ott":
-    buttons = [
-        [InlineKeyboardButton("SunNXT", callback_data="o|sunnxt_p1")],
-        [InlineKeyboardButton("Zee5", callback_data="o|zee5_p1")],
-        [InlineKeyboardButton("DangalPlay", callback_data="o|dangal_p1")],
-        [
-            InlineKeyboardButton(
-                "Hotstar(StarPlus & Colors)", callback_data="o|hotstar_p1"
-            )
-        ],
-        [InlineKeyboardButton("SonyLiv", callback_data="o|sonyliv_p1")],
-        [InlineKeyboardButton("❌ Close", callback_data="close")],
-    ]
+    all_otts = get_all_otts()
+    buttons = []
+    for o_name, o_tag in all_otts:
+      buttons.append([InlineKeyboardButton(o_name, callback_data=f"o|{o_tag}")])
+    buttons.append([InlineKeyboardButton("❌ Close", callback_data="close")])
+
     disp_date = user_date.title() if user_date else "Selected Date"
     await query.message.edit_text(
         "✅ <b>Data fetched successfully!</b>\n\n"
@@ -763,7 +791,6 @@ async def button_click(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "parse_mode": "HTML",
         }
 
-        # Force Override with Clean JPEG Thumbnail Bytes
         if THUMB_BYTES:
           thumb_file = io.BytesIO(THUMB_BYTES)
           thumb_file.name = "thumb.jpg"
