@@ -51,7 +51,6 @@ API_HASH = os.environ.get("API_HASH", "ecb01a29588b13c36c8c373584270ea8")
 TARGET_BOT_USERNAME = "@autofiltertsh_bot"
 SOURCE_CHANNELS = ["tvshowhubb"]
 
-# Aapka Owner Username
 OWNER_USERNAME = "dklr145"
 
 client = pymongo.MongoClient(MONGO_URI)
@@ -524,19 +523,16 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
   if any(m in text.lower() for m in months) and re.search(r"\d+", text):
     user_input_date = text.lower().strip()
 
-    # Check Username for Owner Exemption
     user = update.effective_user
     username = (user.username or "").lower()
 
-    # Today's Date Check
     today_dt = datetime.now()
-    today_fmt1 = today_dt.strftime("%d %B %Y").lower()  # 03 august 2026
-    today_fmt2 = today_dt.strftime("%-d %B %Y").lower()  # 3 august 2026
+    today_fmt1 = today_dt.strftime("%d %B %Y").lower()
+    today_fmt2 = today_dt.strftime("%-d %B %Y").lower()
 
     clean_user_input = re.sub(r"^0(\d)", r"\1", user_input_date)
     clean_today = re.sub(r"^0(\d)", r"\1", today_fmt1)
 
-    # Allow Owner to access Today's Date, block regular users
     if (
         clean_user_input == clean_today
         or user_input_date in [today_fmt1, today_fmt2]
@@ -558,20 +554,19 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
       )
       return
 
-    context.user_data["selected_date"] = user_input_date
+    # User ke chat state mein date save karein
+    context.user_data["active_date"] = user_input_date
 
-    # Bind date string directly into callback query data
-    dt_clean = user_input_date.replace(" ", "")
     buttons = [
-        [InlineKeyboardButton("SunNXT", callback_data=f"ott_sunnxt_p1_{dt_clean}")],
-        [InlineKeyboardButton("Zee5", callback_data=f"ott_zee5_p1_{dt_clean}")],
-        [InlineKeyboardButton("DangalPlay", callback_data=f"ott_dangal_p1_{dt_clean}")],
+        [InlineKeyboardButton("SunNXT", callback_data="o|sunnxt_p1")],
+        [InlineKeyboardButton("Zee5", callback_data="o|zee5_p1")],
+        [InlineKeyboardButton("DangalPlay", callback_data="o|dangal_p1")],
         [
             InlineKeyboardButton(
-                "Hotstar(StarPlus & Colors)", callback_data=f"ott_hotstar_p1_{dt_clean}"
+                "Hotstar(StarPlus & Colors)", callback_data="o|hotstar_p1"
             )
         ],
-        [InlineKeyboardButton("SonyLiv", callback_data=f"ott_sonyliv_p1_{dt_clean}")],
+        [InlineKeyboardButton("SonyLiv", callback_data="o|sonyliv_p1")],
         [InlineKeyboardButton("❌ Close", callback_data="close")],
     ]
     await update.message.reply_text(
@@ -613,18 +608,22 @@ async def button_click(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
     return
 
-  elif data.startswith("ott_"):
-    # Pattern: ott_{ott_tag}_{dt_clean} -> e.g. ott_hotstar_p1_01august2026
-    parts = data.split("_")
-    ott_tag = f"{parts[1]}_{parts[2]}"
-    dt_clean = parts[3]
+  # Date Extracting from Chat Context or Message Text
+  user_date = context.user_data.get("active_date", "")
 
-    # Reconstruct readable date space format
-    m = re.match(r"^(\d+)([a-zA-Z]+)(\d{4})$", dt_clean)
-    if m:
-      user_date = f"{m.group(1)} {m.group(2)} {m.group(3)}"
-    else:
-      user_date = dt_clean
+  if not user_date and query.message and query.message.text:
+    match = re.search(
+        r"Date Requested:\s*\n*([^\n]+)", query.message.text, re.IGNORECASE
+    )
+    if not match:
+      match = re.search(
+          r"Chosen Date:\s*<b>(.+?)</b>", query.message.text, re.IGNORECASE
+      )
+    if match:
+      user_date = match.group(1).strip().lower()
+
+  if data.startswith("o|"):
+    ott_tag = data.split("|")[1]
 
     all_shows = get_all_shows()
     doc = find_db_doc_by_date(user_date)
@@ -636,17 +635,15 @@ async def button_click(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if key in uploaded_shows_dict and len(uploaded_shows_dict[key]) > 0:
           show_buttons.append([
               InlineKeyboardButton(
-                  f"{info['name']} ↗️", callback_data=f"show_{key}_{dt_clean}"
+                  f"{info['name']} ↗️", callback_data=f"s|{key}"
               )
           ])
 
-    disp_date = user_date.title()
+    disp_date = user_date.title() if user_date else "Selected Date"
 
     if show_buttons:
       show_buttons.append([
-          InlineKeyboardButton(
-              "⬅️ Choose OTT", callback_data=f"back_ott_{dt_clean}"
-          ),
+          InlineKeyboardButton("⬅️ Choose OTT", callback_data="b_ott"),
           InlineKeyboardButton("❌ Close", callback_data="close"),
       ])
       await query.message.edit_text(
@@ -658,11 +655,7 @@ async def button_click(update: Update, context: ContextTypes.DEFAULT_TYPE):
       )
     else:
       back_btn = InlineKeyboardMarkup([
-          [
-              InlineKeyboardButton(
-                  "⬅️ Choose OTT", callback_data=f"back_ott_{dt_clean}"
-              )
-          ],
+          [InlineKeyboardButton("⬅️ Choose OTT", callback_data="b_ott")],
           [InlineKeyboardButton("❌ Close", callback_data="close")],
       ])
       await query.message.edit_text(
@@ -672,39 +665,30 @@ async def button_click(update: Update, context: ContextTypes.DEFAULT_TYPE):
           parse_mode="HTML",
       )
 
-  elif data.startswith("back_ott_"):
-    dt_clean = data.replace("back_ott_", "")
-    m = re.match(r"^(\d+)([a-zA-Z]+)(\d{4})$", dt_clean)
-    user_date = f"{m.group(1)} {m.group(2)} {m.group(3)}" if m else dt_clean
-
+  elif data == "b_ott":
     buttons = [
-        [InlineKeyboardButton("SunNXT", callback_data=f"ott_sunnxt_p1_{dt_clean}")],
-        [InlineKeyboardButton("Zee5", callback_data=f"ott_zee5_p1_{dt_clean}")],
-        [InlineKeyboardButton("DangalPlay", callback_data=f"ott_dangal_p1_{dt_clean}")],
+        [InlineKeyboardButton("SunNXT", callback_data="o|sunnxt_p1")],
+        [InlineKeyboardButton("Zee5", callback_data="o|zee5_p1")],
+        [InlineKeyboardButton("DangalPlay", callback_data="o|dangal_p1")],
         [
             InlineKeyboardButton(
-                "Hotstar(StarPlus & Colors)", callback_data=f"ott_hotstar_p1_{dt_clean}"
+                "Hotstar(StarPlus & Colors)", callback_data="o|hotstar_p1"
             )
         ],
-        [InlineKeyboardButton("SonyLiv", callback_data=f"ott_sonyliv_p1_{dt_clean}")],
+        [InlineKeyboardButton("SonyLiv", callback_data="o|sonyliv_p1")],
         [InlineKeyboardButton("❌ Close", callback_data="close")],
     ]
+    disp_date = user_date.title() if user_date else "Selected Date"
     await query.message.edit_text(
         "✅ <b>Data fetched successfully!</b>\n\n"
-        f"📅 <b>Date Requested:</b>\n<b>{user_date.title()}</b>\n\n"
+        f"📅 <b>Date Requested:</b>\n<b>{disp_date}</b>\n\n"
         "🔍 <b>Please choose your desired OTT below:</b>",
         reply_markup=InlineKeyboardMarkup(buttons),
         parse_mode="HTML",
     )
 
-  elif data.startswith("show_"):
-    # Pattern: show_{show_key}_{dt_clean}
-    parts = data.split("_")
-    dt_clean = parts[-1]
-    show_key = "_".join(parts[1:-1])
-
-    m = re.match(r"^(\d+)([a-zA-Z]+)(\d{4})$", dt_clean)
-    user_date = f"{m.group(1)} {m.group(2)} {m.group(3)}" if m else dt_clean
+  elif data.startswith("s|"):
+    show_key = data.split("|")[1]
 
     doc = find_db_doc_by_date(user_date)
     date_db = doc.get("shows", {}) if doc else {}
@@ -754,7 +738,7 @@ async def button_click(update: Update, context: ContextTypes.DEFAULT_TYPE):
       )
 
     else:
-      disp_date = user_date.title()
+      disp_date = user_date.title() if user_date else "Selected Date"
       await query.message.reply_text(
           f"❌ <b>इस तारीख ({disp_date}) में इस शो की कोई वीडियो उपलब्ध नहीं"
           " है!</b>",
