@@ -142,13 +142,11 @@ def find_db_doc_by_date(date_str):
     return None
   clean_date = date_str.strip().lower()
 
-  # Alternate date format calculation (e.g. "01 august 2026" vs "1 august 2026")
   if re.match(r"^0\d", clean_date):
     alt_date = re.sub(r"^0(\d)", r"\1", clean_date)
   else:
     alt_date = re.sub(r"^(\d\s)", r"0\1", clean_date)
 
-  # Try searching with exact, regex, or alternative format
   doc = video_col.find_one({
       "$or": [
           {"date": clean_date},
@@ -580,7 +578,6 @@ async def button_click(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
   data = query.data
 
-  # Read selected_date or extract directly from current text if missing
   user_date = context.user_data.get("selected_date", "").strip().lower()
 
   if not user_date and query.message and query.message.text:
@@ -630,8 +627,8 @@ async def button_click(update: Update, context: ContextTypes.DEFAULT_TYPE):
         ],
         [InlineKeyboardButton("SonyLiv", callback_data="sonyliv_p1")],
         [InlineKeyboardButton("❌ Close", callback_data="close")],
-]
-      disp_date = user_date.title() if user_date else "Selected Date"
+    ]
+    disp_date = user_date.title() if user_date else "Selected Date"
     await query.message.edit_text(
         "✅ <b>Data fetched successfully!</b>\n\n"
         f"📅 <b>Date Requested:</b>\n<b>{disp_date}</b>\n\n"
