@@ -1,4 +1,3 @@
-Python
 import asyncio
 from datetime import datetime
 import os
@@ -136,6 +135,29 @@ def get_all_shows():
   for c in customs:
     shows[c["key"]] = {"name": c["name"], "ott": c["ott"]}
   return shows
+
+
+def find_db_doc_by_date(date_str):
+  if not date_str:
+    return None
+  clean_date = date_str.strip().lower()
+
+  # Alternate date format calculation (e.g. "01 august 2026" vs "1 august 2026")
+  if re.match(r"^0\d", clean_date):
+    alt_date = re.sub(r"^0(\d)", r"\1", clean_date)
+  else:
+    alt_date = re.sub(r"^(\d\s)", r"0\1", clean_date)
+
+  # Try searching with exact, regex, or alternative format
+  doc = video_col.find_one({
+      "$or": [
+          {"date": clean_date},
+          {"date": alt_date},
+          {"date": {"$regex": f"^{clean_date}$", "$options": "i"}},
+          {"date": {"$regex": f"^{alt_date}$", "$options": "i"}},
+      ]
+  })
+  return doc
 
 
 def detect_ott_tag(caption):
@@ -322,7 +344,7 @@ def build_html_caption(raw_name):
 async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
   if update.message:
     await update.message.reply_text(
-        "<b>नमस्ते भाई! कृपया कोई तारीख लिखकर भेजें (जैसे: 02 August 2026)।</b>",
+        "<b>नमस्ते भाई! कृपया कोई तारीख लिखकर भेजें (जैसे: 01 August 2026)।</b>",
         parse_mode="HTML",
     )
 
@@ -348,7 +370,7 @@ async def handle_video_upload(
     total_rec = len(context.user_data["pending_videos"])
     await update.message.reply_text(
         f"🎥 <b>वीडियो प्राप्त हो गई! (कुल: {total_rec})</b>\n\n"
-        "✍️ <b>कृपया तारीख लिखकर भेजें (जैसे: 02 August 2026):</b>",
+        "✍️ <b>कृपया तारीख लिखकर भेजें (जैसे: 01 August 2026):</b>",
         parse_mode="HTML",
     )
 
@@ -373,9 +395,7 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         upsert=True,
     )
 
-    doc = video_col.find_one(
-        {"date": {"$regex": f"^{target_date}$", "$options": "i"}}
-    )
+    doc = find_db_doc_by_date(target_date)
     existing_shows = doc.get("shows", {}) if doc else {}
 
     existing_shows[show_key] = [
@@ -411,9 +431,7 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     replaced_count = 0
     unmatched_list = []
 
-    doc = video_col.find_one(
-        {"date": {"$regex": f"^{target_date}$", "$options": "i"}}
-    )
+    doc = find_db_doc_by_date(target_date)
     existing_shows = doc.get("shows", {}) if doc else {}
 
     new_uploads_grouped = {}
@@ -505,18 +523,18 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
   if any(m in text.lower() for m in months) and re.search(r"\d+", text):
     user_input_date = text.lower().strip()
 
-    # Today's Date Check
+    # Today's Date Blocking Logic
     today_dt = datetime.now()
-    today_fmt1 = today_dt.strftime("%d %B %Y").lower()  # e.g. 03 august 2026
-    today_fmt2 = today_dt.strftime("%-d %B %Y").lower()  # e.g. 3 august 2026
+    today_fmt1 = today_dt.strftime("%d %B %Y").lower()  # 03 august 2026
+    today_fmt2 = today_dt.strftime("%-d %B %Y").lower()  # 3 august 2026
 
-    # Normalize single digit days (03 August 2026 vs 3 August 2026)
-    clean_user_input = re.sub(
-        r"^0(\d)", r"\1", user_input_date
-    )  # converts 03 -> 3
-    clean_today1 = re.sub(r"^0(\d)", r"\1", today_fmt1)
+    clean_user_input = re.sub(r"^0(\d)", r"\1", user_input_date)
+    clean_today = re.sub(r"^0(\d)", r"\1", today_fmt1)
 
-    if clean_user_input == clean_today1:
+    if clean_user_input == clean_today or user_input_date in [
+        today_fmt1,
+        today_fmt2,
+    ]:
       channel_btn = InlineKeyboardMarkup([[
           InlineKeyboardButton(
               "🚀 Main Channel", url="https://t.me/+AT1UIPpK3c04MTk1"
@@ -612,8 +630,8 @@ async def button_click(update: Update, context: ContextTypes.DEFAULT_TYPE):
         ],
         [InlineKeyboardButton("SonyLiv", callback_data="sonyliv_p1")],
         [InlineKeyboardButton("❌ Close", callback_data="close")],
-    ]
-    disp_date = user_date.title() if user_date else "Selected Date"
+]
+      disp_date = user_date.title() if user_date else "Selected Date"
     await query.message.edit_text(
         "✅ <b>Data fetched successfully!</b>\n\n"
         f"📅 <b>Date Requested:</b>\n<b>{disp_date}</b>\n\n"
@@ -625,11 +643,7 @@ async def button_click(update: Update, context: ContextTypes.DEFAULT_TYPE):
   elif data.startswith("ott_") or data.endswith("_p1"):
     all_shows = get_all_shows()
 
-    # Case-insensitive Database Search
-    doc = video_col.find_one(
-        {"date": {"$regex": f"^{user_date}$", "$options": "i"}}
-    )
-
+    doc = find_db_doc_by_date(user_date)
     uploaded_shows_dict = doc.get("shows", {}) if doc else {}
 
     show_buttons = []
@@ -671,11 +685,7 @@ async def button_click(update: Update, context: ContextTypes.DEFAULT_TYPE):
   elif data.startswith("show_"):
     show_key = data.replace("show_", "")
 
-    # Case-insensitive Database Search
-    doc = video_col.find_one(
-        {"date": {"$regex": f"^{user_date}$", "$options": "i"}}
-    )
-
+    doc = find_db_doc_by_date(user_date)
     date_db = doc.get("shows", {}) if doc else {}
     video_list = date_db.get(show_key, [])
 
