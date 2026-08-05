@@ -1,3 +1,4 @@
+import asyncio
 import os
 import re
 from telegram import Update
@@ -9,21 +10,26 @@ from telegram.ext import (
     filters,
 )
 
+# ----------------- CONFIG & TOKEN -----------------
 BOT_TOKEN = os.environ.get(
     "BOT_TOKEN", "8909033238:AAEJAlM_zoHpgVzbBrMEB4zDiCYr4NUBZjo"
 )
 
 
 def build_dklr_caption_and_name(raw_name):
+  # 1. Clean file extension from the end
   base_name = re.sub(
       r"\.(mp4|mkv|avi|mov|webm|flv)$", "", raw_name, flags=re.IGNORECASE
   )
+
+  # 2. Clean existing tags/channels
   base_name = re.sub(
       r"[-_.\s]+(TvShowHub|ANTONi|webdlbot|DG_Contents|DG_Content|UtsavTV|Nx-DRM-DL|DS_Ottwebdlbot|kairax007|ottwebdlbot|DKLR_DR|DKLRDR|DKLRShowhub)[-_.\s]*$",
       "",
       base_name,
       flags=re.IGNORECASE,
   )
+
   base_name = base_name.strip(".-_ ")
   final_filename = f"{base_name}.DKLRShowhub.mp4"
 
@@ -66,15 +72,23 @@ async def auto_process_media(
   )
 
 
-def main():
+async def main():
   app = ApplicationBuilder().token(BOT_TOKEN).build()
   app.add_handler(CommandHandler("start", start_command))
   app.add_handler(
       MessageHandler(filters.VIDEO | filters.DOCUMENT, auto_process_media)
   )
+
   print("Instant Auto-Rename Bot Engine Live...")
-  app.run_polling()
+  async with app:
+    await app.start()
+    await app.updater.start_polling()
+    # Keep running
+    await asyncio.Event().wait()
 
 
 if __name__ == "__main__":
-  main()
+  try:
+    asyncio.run(main())
+  except (KeyboardInterrupt, SystemExit):
+    pass
