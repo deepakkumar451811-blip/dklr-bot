@@ -17,19 +17,15 @@ BOT_TOKEN = os.environ.get(
 
 
 def build_dklr_caption_and_name(raw_name):
-  # 1. Clean file extension from the end
   base_name = re.sub(
       r"\.(mp4|mkv|avi|mov|webm|flv)$", "", raw_name, flags=re.IGNORECASE
   )
-
-  # 2. Clean existing tags/channels
   base_name = re.sub(
       r"[-_.\s]+(TvShowHub|ANTONi|webdlbot|DG_Contents|DG_Content|UtsavTV|Nx-DRM-DL|DS_Ottwebdlbot|kairax007|ottwebdlbot|DKLR_DR|DKLRDR|DKLRShowhub)[-_.\s]*$",
       "",
       base_name,
       flags=re.IGNORECASE,
   )
-
   base_name = base_name.strip(".-_ ")
   final_filename = f"{base_name}.DKLRShowhub.mp4"
 
@@ -83,7 +79,6 @@ async def main():
   async with app:
     await app.start()
     await app.updater.start_polling()
-    # Keep running
     await asyncio.Event().wait()
 
 
