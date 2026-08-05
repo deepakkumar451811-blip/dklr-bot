@@ -179,36 +179,38 @@ def find_db_doc_by_date(date_str):
   return doc
 
 
-def extract_ep_num(text):
-  match = re.search(r"(?:ep|episode|e)[._\s-]*(\d+)", text, re.IGNORECASE)
-  if match:
-    return match.group(1)
-  return None
+def extract_ep_and_quality(text):
+  ep_match = re.search(r"(?:ep|episode|e)[._\s-]*(\d+)", text, re.IGNORECASE)
+  q_match = re.search(r"(\d{3,4}p)", text, re.IGNORECASE)
+
+  ep = ep_match.group(1) if ep_match else "0"
+  quality = q_match.group(1).lower() if q_match else "default"
+  return ep, quality
 
 
 def extract_base_title(raw_name):
-  clean = (
-      raw_name.replace("TvShowHub", "")
-      .replace("tvshowhub", "")
-      .replace("DKLRShowhub", "")
-      .replace("DKLRDR", "")
+  # Clean brand suffixes
+  clean = re.sub(
+      r"[-_.\s]*(TvShowHub|ANTONi|webdlbot|DG_Contents|DG_Content|UtsavTV|Nx-DRM-DL|DS_Ottwebdlbot|kairax007|ottwebdlbot|DKLR_DR|DKLRDR|DKLRShowhub)\b",
+      "",
+      raw_name,
+      flags=re.IGNORECASE,
   )
-  clean_text = clean.replace(".", " ").replace("_", " ")
 
-  parts = clean_text.split()
-  title_parts = []
-  for p in parts:
-    if re.search(
-        r"^(Season|Episode|Ep|E\d+|\d+p|Web|Dl|AAC|H|264|DangalPlay|Hotstar|Zee5|SonyLiv|SunNXT)",
-        p,
-        re.IGNORECASE,
-    ):
-      break
-    title_parts.append(p)
+  # Cut title before Episode or Quality keywords
+  match = re.split(
+      r"[._\s-]+(?:Season|Episode|Ep|E\d+|\d{3,4}p|Web|Dl|AAC)",
+      clean,
+      flags=re.IGNORECASE,
+  )
+  title_part = match[0] if match else clean
 
-  title_part = " ".join(title_parts).strip()
+  # Replace dots, dashes, underscores with single space
+  title_part = title_part.replace(".", " ").replace("-", " ").replace("_", " ")
+  title_part = re.sub(r"\s+", " ", title_part).strip()
+
   if not title_part or len(title_part) < 2:
-    title_part = "Unmatched Show " + raw_name[:10]
+    title_part = "Unmatched Show"
   return title_part.title()
 
 
@@ -431,17 +433,17 @@ async def save_manual_show_to_db(
   if show_key not in existing_shows:
     existing_shows[show_key] = []
 
+  # SAVE ALL QUALITY FILES ACCURATELY
   for new_v in vid_list:
-    new_ep = extract_ep_num(new_v["raw_name"])
+    new_ep, new_q = extract_ep_and_quality(new_v["raw_name"])
     replaced = False
 
-    if new_ep:
-      for i, old_v in enumerate(existing_shows[show_key]):
-        old_ep = extract_ep_num(old_v["raw_name"])
-        if old_ep == new_ep:
-          existing_shows[show_key][i] = new_v
-          replaced = True
-          break
+    for i, old_v in enumerate(existing_shows[show_key]):
+      old_ep, old_q = extract_ep_and_quality(old_v["raw_name"])
+      if old_ep == new_ep and old_q == new_q:
+        existing_shows[show_key][i] = new_v
+        replaced = True
+        break
 
     if not replaced:
       existing_shows[show_key].append(new_v)
@@ -458,7 +460,7 @@ async def save_manual_show_to_db(
       f"✅ <b>नया शो सफ़लतापूर्वक ऐडेड!</b>\n\n"
       f"🎬 <b>Show Name:</b> {show_name}\n"
       f"📺 <b>OTT:</b> {display_ott}\n"
-      f"📁 <b>Total Files Saved:</b> {len(existing_shows[show_key])} Videos\n"
+      f"📁 <b>Total Files Saved:</b> {len(existing_shows[show_key])} Videos (All Quality)\n"
       f"📅 <b>Date:</b> {target_date.title()}\n\n"
       "🎉 <b>अब ये सभी वीडियोस इस एक शो के बटन में खुलेंगी!</b>"
   )
@@ -554,7 +556,7 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
       )
     return
 
-  # 4. DATE ENTRY AFTER UPLOAD (GROUP UNMATCHED BY SHOW TITLE)
+  # 4. DATE ENTRY AFTER UPLOAD
   if context.user_data.get("awaiting_upload_date"):
     target_date = text.lower().strip()
     context.user_data["awaiting_upload_date"] = False
@@ -578,17 +580,16 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
       if matched_key not in existing_shows:
         existing_shows[matched_key] = []
 
-      new_ep = extract_ep_num(vid["raw_name"])
+      new_ep, new_q = extract_ep_and_quality(vid["raw_name"])
       is_replaced = False
 
-      if new_ep:
-        for idx, old_vid in enumerate(existing_shows[matched_key]):
-          old_ep = extract_ep_num(old_vid["raw_name"])
-          if old_ep == new_ep:
-            existing_shows[matched_key][idx] = vid
-            replaced_count += 1
-            is_replaced = True
-            break
+      for idx, old_vid in enumerate(existing_shows[matched_key]):
+        old_ep, old_q = extract_ep_and_quality(old_vid["raw_name"])
+        if old_ep == new_ep and old_q == new_q:
+          existing_shows[matched_key][idx] = vid
+          replaced_count += 1
+          is_replaced = True
+          break
 
       if not is_replaced:
         existing_shows[matched_key].append(vid)
@@ -610,7 +611,7 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     if replaced_count > 0:
       msg += (
-          f"🔄 <b>सेम एपिसोड होने के कारण रिप्लेस किए गए:</b>"
+          f"🔄 <b>सेम क्वालिटी/एपिसोड होने के कारण रिप्लेस किए गए:</b>"
           f" <b>{replaced_count} वीडियोस</b>\n"
       )
 
@@ -619,7 +620,6 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if unmatched_list:
       clean_date_tag = target_date.replace(" ", "_")
 
-      # GROUP UNMATCHED FILES BY THEIR DETECTED SHOW NAME
       grouped_unmatched = {}
       for u_vid in unmatched_list:
         base_title = extract_base_title(u_vid["raw_name"])
@@ -642,13 +642,13 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         buttons.append([
             InlineKeyboardButton(
-                f"➕ Add '{g_title[:20]}' ({len(g_vids)} Files)",
+                f"➕ Add '{g_title}' ({len(g_vids)} Files)",
                 callback_data=f"addgroup|{clean_date_tag}|{g_idx-1}",
             )
         ])
 
       unmatch_info += (
-          "\n👇 <b>अलग-अलग शो को जोड़ने के लिए ऊपर दिए संबंधित बटन दबाएँ:</b>"
+          "\n👇 <b>शो जोड़ने के लिए ऊपर दिए संबंधित बटन दबाएँ:</b>"
       )
 
       await update.message.reply_text(
@@ -817,8 +817,9 @@ async def button_click(update: Update, context: ContextTypes.DEFAULT_TYPE):
       context.user_data["adding_manual_show"] = True
 
       await query.message.reply_text(
-          f"✍️ <b>कृपया इस शो ({selected_title}) का सही नाम पढ़कर लिखकर भेजें:</b>\n\n"
-          f"<i>कुल {len(selected_vids)} फाइल्स इस शो में सेव होंगी।</i>",
+          f"✍️ <b>कृपया इस शो का नाम लिखकर भेजें:</b>\n"
+          f"💡 <i>(सजेस्टेड नाम: <code>{selected_title}</code>)</i>\n\n"
+          f"<i>कुल {len(selected_vids)} फ़ाइलें इस शो में सेव होंगी।</i>",
           parse_mode="HTML",
       )
     return
