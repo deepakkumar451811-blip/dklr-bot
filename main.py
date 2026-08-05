@@ -186,6 +186,32 @@ def extract_ep_num(text):
   return None
 
 
+def extract_base_title(raw_name):
+  clean = (
+      raw_name.replace("TvShowHub", "")
+      .replace("tvshowhub", "")
+      .replace("DKLRShowhub", "")
+      .replace("DKLRDR", "")
+  )
+  clean_text = clean.replace(".", " ").replace("_", " ")
+
+  parts = clean_text.split()
+  title_parts = []
+  for p in parts:
+    if re.search(
+        r"^(Season|Episode|Ep|E\d+|\d+p|Web|Dl|AAC|H|264|DangalPlay|Hotstar|Zee5|SonyLiv|SunNXT)",
+        p,
+        re.IGNORECASE,
+    ):
+      break
+    title_parts.append(p)
+
+  title_part = " ".join(title_parts).strip()
+  if not title_part or len(title_part) < 2:
+    title_part = "Unmatched Show " + raw_name[:10]
+  return title_part.title()
+
+
 def detect_ott_tag(caption):
   text = caption.upper()
   if any(k in text for k in [".ZEE5.", "ZEE5", ".Z5.", " Z5 "]):
@@ -528,7 +554,7 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
       )
     return
 
-  # 4. DATE ENTRY AFTER UPLOAD (SHOW UNMATCHED FILE NAMES CLEARLY)
+  # 4. DATE ENTRY AFTER UPLOAD (GROUP UNMATCHED BY SHOW TITLE)
   if context.user_data.get("awaiting_upload_date"):
     target_date = text.lower().strip()
     context.user_data["awaiting_upload_date"] = False
@@ -592,32 +618,37 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     if unmatched_list:
       clean_date_tag = target_date.replace(" ", "_")
-      context.user_data["unmatched_all_list"] = unmatched_list
 
-      buttons = [[
-          InlineKeyboardButton(
-              f"➕ Add All ({len(unmatched_list)}) Unmatched Files to ONE Show",
-              callback_data=f"addm_all|{clean_date_tag}",
-          )
-      ]]
+      # GROUP UNMATCHED FILES BY THEIR DETECTED SHOW NAME
+      grouped_unmatched = {}
+      for u_vid in unmatched_list:
+        base_title = extract_base_title(u_vid["raw_name"])
+        if base_title not in grouped_unmatched:
+          grouped_unmatched[base_title] = []
+        grouped_unmatched[base_title].append(u_vid)
 
+      context.user_data["unmatched_groups"] = grouped_unmatched
+
+      buttons = []
+      g_idx = 0
       unmatch_info = (
-          f"🚨 <b>कुल {len(unmatched_list)} अनमैच फाइल्स बची हैं:</b>\n\n"
+          f"🚨 <b>कुल {len(unmatched_list)} अनमैच फाइल्स मिले हैं!</b>\n\n"
       )
 
-      # PRINT FILE NAMES UP TO 10
-      for idx, u_file in enumerate(unmatched_list[:10]):
+      for g_title, g_vids in grouped_unmatched.items():
+        g_idx += 1
         unmatch_info += (
-            f"📄 <b>File #{idx+1}:</b> <code>{u_file['raw_name']}</code>\n"
+            f"🎬 <b>Show #{g_idx}: {g_title}</b> ({len(g_vids)} Files)\n"
         )
-
-      if len(unmatched_list) > 10:
-        unmatch_info += (
-            f"\n<i>...और {len(unmatched_list) - 10} और फाइल्स हैं।</i>\n"
-        )
+        buttons.append([
+            InlineKeyboardButton(
+                f"➕ Add '{g_title[:20]}' ({len(g_vids)} Files)",
+                callback_data=f"addgroup|{clean_date_tag}|{g_idx-1}",
+            )
+        ])
 
       unmatch_info += (
-          "\n👇 <b>इन फाइल्स का सही शो नाम लिखकर भेजने के लिए बटन दबाएँ:</b>"
+          "\n👇 <b>अलग-अलग शो को जोड़ने के लिए ऊपर दिए संबंधित बटन दबाएँ:</b>"
       )
 
       await update.message.reply_text(
@@ -769,21 +800,27 @@ async def button_click(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await query.message.reply_text(res_msg, parse_mode="HTML")
     return
 
-  elif data.startswith("addm_all|"):
-    clean_date_tag = data.split("|")[1]
+  elif data.startswith("addgroup|"):
+    _, clean_date_tag, group_idx_str = data.split("|")
     target_date = clean_date_tag.replace("_", " ")
+    g_idx = int(group_idx_str)
 
-    unmatched_list = context.user_data.get("unmatched_all_list", [])
+    grouped_unmatched = context.user_data.get("unmatched_groups", {})
+    titles_list = list(grouped_unmatched.keys())
 
-    context.user_data["manual_vid_list"] = unmatched_list
-    context.user_data["manual_date"] = target_date
-    context.user_data["adding_manual_show"] = True
+    if g_idx < len(titles_list):
+      selected_title = titles_list[g_idx]
+      selected_vids = grouped_unmatched[selected_title]
 
-    await query.message.reply_text(
-        f"✍️ <b>कृपया इन सभी {len(unmatched_list)} अनमैच वीडियोस के शो का सही नाम पढ़कर लिखकर भेजें:</b>\n\n"
-        "<i>नाम भेजते ही बॉट ऑटो-डिटेक्ट करके इसे सही OTT में सेव कर देगा!</i>",
-        parse_mode="HTML",
-    )
+      context.user_data["manual_vid_list"] = selected_vids
+      context.user_data["manual_date"] = target_date
+      context.user_data["adding_manual_show"] = True
+
+      await query.message.reply_text(
+          f"✍️ <b>कृपया इस शो ({selected_title}) का सही नाम पढ़कर लिखकर भेजें:</b>\n\n"
+          f"<i>कुल {len(selected_vids)} फाइल्स इस शो में सेव होंगी।</i>",
+          parse_mode="HTML",
+      )
     return
 
   user_date = context.user_data.get("active_date", "")
