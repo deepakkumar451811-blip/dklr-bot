@@ -1,34 +1,35 @@
-import asyncio
 import os
 import re
-from telegram import Update
-from telegram.ext import (
-    ApplicationBuilder,
-    CommandHandler,
-    ContextTypes,
-    MessageHandler,
-    filters,
-)
+import telebot
 
-# ----------------- CONFIG & TOKEN -----------------
+# ----------------- CONFIG & NEW BOT TOKEN -----------------
 BOT_TOKEN = os.environ.get(
     "BOT_TOKEN", "8909033238:AAEJAlM_zoHpgVzbBrMEB4zDiCYr4NUBZjo"
 )
 
+bot = telebot.TeleBot(BOT_TOKEN, parse_mode="HTML")
+
 
 def build_dklr_caption_and_name(raw_name):
+  # 1. Clean file extension from the end
   base_name = re.sub(
       r"\.(mp4|mkv|avi|mov|webm|flv)$", "", raw_name, flags=re.IGNORECASE
   )
+
+  # 2. Clean existing tags, channels or webdl terms
   base_name = re.sub(
       r"[-_.\s]+(TvShowHub|ANTONi|webdlbot|DG_Contents|DG_Content|UtsavTV|Nx-DRM-DL|DS_Ottwebdlbot|kairax007|ottwebdlbot|DKLR_DR|DKLRDR|DKLRShowhub)[-_.\s]*$",
       "",
       base_name,
       flags=re.IGNORECASE,
   )
+
   base_name = base_name.strip(".-_ ")
+
+  # 3. Attach exact '.DKLRShowhub.mp4' to the very end
   final_filename = f"{base_name}.DKLRShowhub.mp4"
 
+  # 4. Your exact requested HTML Caption
   caption_text = (
       f"📄 <b>{final_filename}</b>\n\n"
       "⚡️ <b>Join :-</b> [ <b>@DKLRShowhub</b> ]\n\n"
@@ -40,50 +41,34 @@ def build_dklr_caption_and_name(raw_name):
   return caption_text
 
 
-async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-  if update.message:
-    await update.message.reply_text(
-        "🚀 <b>DKLR Instant Auto-Rename Bot Active!</b>\n\n"
-        "<i>मुझे कोई भी वीडियो या डॉक्यूमेंट भेजें, मैं तुरंत उस पर आपका DKLR नाम और कैप्शन लगा दूँगा।</i>",
-        parse_mode="HTML",
-    )
+@bot.message_handler(commands=["start"])
+def start_command(message):
+  bot.reply_to(
+      message,
+      "🚀 <b>DKLR Instant Auto-Rename Bot Active!</b>\n\n"
+      "<i>मुझे कोई भी वीडियो या डॉक्यूमेंट भेजें, मैं तुरंत उस पर आपका DKLR नाम"
+      " और कैप्शन लगा दूँगा।</i>",
+  )
 
 
-async def auto_process_media(
-    update: Update, context: ContextTypes.DEFAULT_TYPE
-):
-  msg = update.message
-  file_obj = msg.video or msg.document
+@bot.message_handler(content_types=["video", "document"])
+def auto_process_media(message):
+  file_obj = message.video or message.document
   if not file_obj:
     return
 
-  raw_name = msg.caption or file_obj.file_name or "Episode_Video.mp4"
+  raw_name = (
+      message.caption
+      or getattr(file_obj, "file_name", None)
+      or "Episode_Video.mp4"
+  )
   caption_text = build_dklr_caption_and_name(raw_name)
 
-  await context.bot.send_document(
-      chat_id=msg.chat_id,
-      document=file_obj.file_id,
-      caption=caption_text,
-      parse_mode="HTML",
+  bot.send_document(
+      message.chat.id, file_obj.file_id, caption=caption_text, parse_mode="HTML"
   )
-
-
-async def main():
-  app = ApplicationBuilder().token(BOT_TOKEN).build()
-  app.add_handler(CommandHandler("start", start_command))
-  app.add_handler(
-      MessageHandler(filters.VIDEO | filters.DOCUMENT, auto_process_media)
-  )
-
-  print("Instant Auto-Rename Bot Engine Live...")
-  async with app:
-    await app.start()
-    await app.updater.start_polling()
-    await asyncio.Event().wait()
 
 
 if __name__ == "__main__":
-  try:
-    asyncio.run(main())
-  except (KeyboardInterrupt, SystemExit):
-    pass
+  print("Instant Auto-Rename Bot Live...")
+  bot.infinity_polling(timeout=10, long_polling_timeout=5)
