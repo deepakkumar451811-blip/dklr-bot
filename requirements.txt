@@ -1,7 +1,6 @@
 python-telegram-bot==20.7
+pyTelegramBotAPI
 pyrogram==2.0.106
 tgcrypto==1.2.5
 pymongo[srv]==4.6.1
 flask==3.0.0
-python-telegram-bot
-pymongo
