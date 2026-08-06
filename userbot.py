@@ -1,3 +1,4 @@
+import asyncio
 import os
 import re
 from threading import Thread
@@ -18,7 +19,7 @@ def run_flask():
   app.run(host='0.0.0.0', port=port)
 
 
-Thread(target=run_flask).start()
+Thread(target=run_flask, daemon=True).start()
 
 # ----------------- CONFIG VARIABLES -----------------
 API_ID = int(os.environ.get('API_ID', '30366893'))
@@ -32,7 +33,6 @@ userbot = Client(
     session_string=STRING_SESSION,
 )
 
-# चैनल्स की ID याद रखने के लिए ग्लोबल वेरिएबल
 config = {'source_chat': None, 'target_chat': None, 'mode': None}
 
 
@@ -60,7 +60,7 @@ def build_dklr_caption_and_name(raw_name):
   return caption_text
 
 
-# ----------------- COMMANDS & SETUP -----------------
+# ----------------- COMMANDS -----------------
 @userbot.on_message(filters.me & filters.command('set_source'))
 async def set_source_cmd(client, message):
   config['mode'] = 'awaiting_source'
@@ -89,7 +89,7 @@ async def status_cmd(client, message):
   )
 
 
-# ----------------- CAPTURE FORWARDED MESSAGES FOR CONFIG -----------------
+# ----------------- FORWARD CAPTURE -----------------
 @userbot.on_message(filters.me & filters.forwarded)
 async def capture_forwarded_chats(client, message):
   if config['mode'] == 'awaiting_source':
@@ -114,15 +114,12 @@ async def capture_forwarded_chats(client, message):
           f' {config["target_chat"]}'
       )
     else:
-      await message.reply_text(
-          '⚠️ कृपया अपने चैनल का मैसेज फ़ॉरवर्ड करें।'
-      )
+      await message.reply_text('⚠️ कृपया अपने चैनल का मैसेज फ़ॉरवर्ड करें।')
 
 
-# ----------------- AUTOMATIC AUTO-FORWARD & RENAME -----------------
+# ----------------- AUTO FORWARD LOGIC -----------------
 @userbot.on_message()
 async def auto_forward_logic(client, message):
-  # अगर मैसेज उसी Source Channel से आया है जिसे सेट किया गया है
   if config['source_chat'] and message.chat.id == config['source_chat']:
     target = config['target_chat']
     if not target:
@@ -156,6 +153,13 @@ async def auto_forward_logic(client, message):
       print(f'Error forwarding: {e}')
 
 
+# ----------------- ASYNC MAIN RUNNER -----------------
+async def main():
+  await userbot.start()
+  print('Smart Userbot Successfully Started!')
+  await asyncio.Event().wait()
+
+
 if __name__ == '__main__':
-  print('Smart Userbot Starting...')
-  userbot.run()
+  loop = asyncio.get_event_loop()
+  loop.run_until_complete(main())
