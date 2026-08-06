@@ -11,7 +11,7 @@ app = Flask(__name__)
 
 @app.route('/')
 def home():
-  return 'DKLR Smart Userbot Active!'
+  return 'DKLR Userbot Active!'
 
 
 def run_flask():
@@ -26,7 +26,7 @@ API_ID = int(os.environ.get('API_ID', '30366893'))
 API_HASH = os.environ.get('API_HASH', 'ecb01a29588b13c36c8c373584270ea8')
 STRING_SESSION = os.environ.get('STRING_SESSION', '')
 
-userbot = Client(
+app_user = Client(
     'dklr_userbot',
     api_id=API_ID,
     api_hash=API_HASH,
@@ -61,7 +61,7 @@ def build_dklr_caption_and_name(raw_name):
 
 
 # ----------------- COMMANDS -----------------
-@userbot.on_message(filters.me & filters.command('set_source'))
+@app_user.on_message(filters.me & filters.command('set_source'))
 async def set_source_cmd(client, message):
   config['mode'] = 'awaiting_source'
   await message.reply_text(
@@ -70,7 +70,7 @@ async def set_source_cmd(client, message):
   )
 
 
-@userbot.on_message(filters.me & filters.command('set_target'))
+@app_user.on_message(filters.me & filters.command('set_target'))
 async def set_target_cmd(client, message):
   config['mode'] = 'awaiting_target'
   await message.reply_text(
@@ -79,7 +79,7 @@ async def set_target_cmd(client, message):
   )
 
 
-@userbot.on_message(filters.me & filters.command('status'))
+@app_user.on_message(filters.me & filters.command('status'))
 async def status_cmd(client, message):
   src = config['source_chat'] or 'Not Set'
   tgt = config['target_chat'] or 'Not Set'
@@ -90,27 +90,25 @@ async def status_cmd(client, message):
 
 
 # ----------------- FORWARD CAPTURE -----------------
-@userbot.on_message(filters.me & filters.forwarded)
+@app_user.on_message(filters.me & filters.forwarded)
 async def capture_forwarded_chats(client, message):
   if config['mode'] == 'awaiting_source':
     if message.forward_from_chat:
       config['source_chat'] = message.forward_from_chat.id
       config['mode'] = None
       await message.reply_text(
-          '✅ <b>Source Channel सफलतापूर्वक सेट हो गया!</b>\nChat ID:'
+          f'✅ <b>Source Channel सेट हो गया!</b>\nChat ID:'
           f' {config["source_chat"]}'
       )
     else:
-      await message.reply_text(
-          '⚠️ कृपया चैनल का मैसेज ही फ़ॉरवर्ड करें (User/Group का नहीं)।'
-      )
+      await message.reply_text('⚠️ कृपया चैनल का मैसेज ही फ़ॉरवर्ड करें।')
 
   elif config['mode'] == 'awaiting_target':
     if message.forward_from_chat:
       config['target_chat'] = message.forward_from_chat.id
       config['mode'] = None
       await message.reply_text(
-          '✅ <b>Target Channel सफलतापूर्वक सेट हो गया!</b>\nChat ID:'
+          f'✅ <b>Target Channel सेट हो गया!</b>\nChat ID:'
           f' {config["target_chat"]}'
       )
     else:
@@ -118,7 +116,7 @@ async def capture_forwarded_chats(client, message):
 
 
 # ----------------- AUTO FORWARD LOGIC -----------------
-@userbot.on_message()
+@app_user.on_message()
 async def auto_forward_logic(client, message):
   if config['source_chat'] and message.chat.id == config['source_chat']:
     target = config['target_chat']
@@ -142,24 +140,22 @@ async def auto_forward_logic(client, message):
             caption=caption_text,
             parse_mode='html',
         )
-        print('Post successfully copied and sent to target!')
+        print('Post copied to target!')
 
       elif message.text:
         await client.send_message(
             chat_id=target, text=message.text, parse_mode='html'
         )
-
     except Exception as e:
       print(f'Error forwarding: {e}')
 
 
 # ----------------- ASYNC MAIN RUNNER -----------------
 async def main():
-  await userbot.start()
-  print('Smart Userbot Successfully Started!')
+  await app_user.start()
+  print('Userbot Successfully Started!')
   await asyncio.Event().wait()
 
 
 if __name__ == '__main__':
-  loop = asyncio.get_event_loop()
-  loop.run_until_complete(main())
+  asyncio.run(main())
