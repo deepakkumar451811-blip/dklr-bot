@@ -3,7 +3,8 @@ import os
 import re
 from threading import Thread
 from flask import Flask
-from pyrogram import Client, filters
+from telethon import Telethon, events
+from telethon.sessions import StringSession
 
 # ----------------- FLASK KEEP-ALIVE -----------------
 app = Flask(__name__)
@@ -21,16 +22,13 @@ def run_flask():
 
 Thread(target=run_flask, daemon=True).start()
 
-# ----------------- CONFIG VARIABLES -----------------
+# ----------------- CONFIG -----------------
 API_ID = int(os.environ.get('API_ID', '30366893'))
 API_HASH = os.environ.get('API_HASH', 'ecb01a29588b13c36c8c373584270ea8')
 STRING_SESSION = os.environ.get('STRING_SESSION', '')
 
-app_user = Client(
-    'dklr_userbot',
-    api_id=API_ID,
-    api_hash=API_HASH,
-    session_string=STRING_SESSION,
+client = Telethon(
+    StringSession(STRING_SESSION), API_ID, API_HASH, sequential_updates=True
 )
 
 config = {'source_chat': None, 'target_chat': None, 'mode': None}
@@ -61,101 +59,100 @@ def build_dklr_caption_and_name(raw_name):
 
 
 # ----------------- COMMANDS -----------------
-@app_user.on_message(filters.me & filters.command('set_source'))
-async def set_source_cmd(client, message):
+@client.on(events.NewMessage(outgoing=True, pattern=r'/set_source'))
+async def set_source_cmd(event):
   config['mode'] = 'awaiting_source'
-  await message.reply_text(
+  await event.reply(
       '📥 <b>Source Channel सेट करने के लिए:</b>\nअब उस चैनल की कोई भी पोस्ट'
-      ' यहाँ <b>Forward</b> करें!'
+      ' यहाँ <b>Forward</b> करें!',
+      parse_mode='html',
   )
 
 
-@app_user.on_message(filters.me & filters.command('set_target'))
-async def set_target_cmd(client, message):
+@client.on(events.NewMessage(outgoing=True, pattern=r'/set_target'))
+async def set_target_cmd(event):
   config['mode'] = 'awaiting_target'
-  await message.reply_text(
+  await event.reply(
       '📤 <b>Target Channel सेट करने के लिए:</b>\nअब अपने मेन चैनल की कोई भी'
-      ' पोस्ट यहाँ <b>Forward</b> करें!'
+      ' पोस्ट यहाँ <b>Forward</b> करें!',
+      parse_mode='html',
   )
 
 
-@app_user.on_message(filters.me & filters.command('status'))
-async def status_cmd(client, message):
+@client.on(events.NewMessage(outgoing=True, pattern=r'/status'))
+async def status_cmd(event):
   src = config['source_chat'] or 'Not Set'
   tgt = config['target_chat'] or 'Not Set'
-  await message.reply_text(
+  await event.reply(
       f'📊 <b>Current Config:</b>\n\n📥 <b>Source Channel:</b> {src}\n📤'
-      f' <b>Target Channel:</b> {tgt}'
+      f' <b>Target Channel:</b> {tgt}',
+      parse_mode='html',
   )
 
 
 # ----------------- FORWARD CAPTURE -----------------
-@app_user.on_message(filters.me & filters.forwarded)
-async def capture_forwarded_chats(client, message):
-  if config['mode'] == 'awaiting_source':
-    if message.forward_from_chat:
-      config['source_chat'] = message.forward_from_chat.id
-      config['mode'] = None
-      await message.reply_text(
-          f'✅ <b>Source Channel सेट हो गया!</b>\nChat ID:'
-          f' {config["source_chat"]}'
-      )
-    else:
-      await message.reply_text('⚠️ कृपया चैनल का मैसेज ही फ़ॉरवर्ड करें।')
+@client.on(events.NewMessage(outgoing=True))
+async def capture_forwarded_chats(event):
+  if event.fwd_from and event.fwd_from.from_id:
+    forwarded_chat = event.fwd_from.from_id
+    chat_id = getattr(forwarded_chat, 'channel_id', None)
 
-  elif config['mode'] == 'awaiting_target':
-    if message.forward_from_chat:
-      config['target_chat'] = message.forward_from_chat.id
-      config['mode'] = None
-      await message.reply_text(
-          f'✅ <b>Target Channel सेट हो गया!</b>\nChat ID:'
-          f' {config["target_chat"]}'
-      )
-    else:
-      await message.reply_text('⚠️ कृपया अपने चैनल का मैसेज फ़ॉरवर्ड करें।')
+    if chat_id:
+      full_chat_id = int(f'-100{chat_id}')
+      if config['mode'] == 'awaiting_source':
+        config['source_chat'] = full_chat_id
+        config['mode'] = None
+        await event.reply(
+            f'✅ <b>Source Channel सेट हो गया!</b>\nChat ID: {full_chat_id}',
+            parse_mode='html',
+        )
+
+      elif config['mode'] == 'awaiting_target':
+        config['target_chat'] = full_chat_id
+        config['mode'] = None
+        await event.reply(
+            f'✅ <b>Target Channel सेट हो गया!</b>\nChat ID: {full_chat_id}',
+            parse_mode='html',
+        )
 
 
 # ----------------- AUTO FORWARD LOGIC -----------------
-@app_user.on_message()
-async def auto_forward_logic(client, message):
-  if config['source_chat'] and message.chat.id == config['source_chat']:
+@client.on(events.NewMessage)
+async def auto_forward_logic(event):
+  if config['source_chat'] and event.chat_id == config['source_chat']:
     target = config['target_chat']
     if not target:
       return
 
     try:
-      if message.media:
-        file_obj = message.video or message.document
+      if event.media:
         raw_name = (
-            message.caption
-            or (file_obj.file_name if file_obj else None)
-            or 'Episode_Video.mp4'
+            event.text or getattr(event.media, 'document', None) or 'Episode.mp4'
         )
+        if hasattr(raw_name, 'attributes'):
+          for attr in raw_name.attributes:
+            if hasattr(attr, 'file_name'):
+              raw_name = attr.file_name
+              break
+        if not isinstance(raw_name, str):
+          raw_name = 'Episode_Video.mp4'
 
         caption_text = build_dklr_caption_and_name(raw_name)
-
-        await client.send_cached_media(
-            chat_id=target,
-            file_id=file_obj.file_id,
-            caption=caption_text,
-            parse_mode='html',
+        await client.send_file(
+            target, event.media, caption=caption_text, parse_mode='html'
         )
-        print('Post copied to target!')
-
-      elif message.text:
-        await client.send_message(
-            chat_id=target, text=message.text, parse_mode='html'
-        )
+      elif event.text:
+        await client.send_message(target, event.text, parse_mode='html')
     except Exception as e:
       print(f'Error forwarding: {e}')
 
 
-# ----------------- ASYNC MAIN RUNNER -----------------
 async def main():
-  await app_user.start()
-  print('Userbot Successfully Started!')
-  await asyncio.Event().wait()
+  await client.start()
+  print('Userbot Successfully Started with Telethon!')
+  await client.run_until_disconnected()
 
 
 if __name__ == '__main__':
-  asyncio.run(main())
+  loop = asyncio.get_event_loop()
+  loop.run_until_complete(main())
