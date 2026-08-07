@@ -3,7 +3,8 @@ import os
 import re
 from threading import Thread
 from flask import Flask
-from telethon import Telethon, events
+import telethon
+from telethon import events
 from telethon.sessions import StringSession
 
 # ----------------- FLASK KEEP-ALIVE -----------------
@@ -12,7 +13,7 @@ app = Flask(__name__)
 
 @app.route('/')
 def home():
-  return 'DKLR Userbot Active!'
+  return 'DKLR Telethon Userbot Active!'
 
 
 def run_flask():
@@ -22,12 +23,12 @@ def run_flask():
 
 Thread(target=run_flask, daemon=True).start()
 
-# ----------------- CONFIG -----------------
+# ----------------- CONFIG VARIABLES -----------------
 API_ID = int(os.environ.get('API_ID', '30366893'))
 API_HASH = os.environ.get('API_HASH', 'ecb01a29588b13c36c8c373584270ea8')
 STRING_SESSION = os.environ.get('STRING_SESSION', '')
 
-client = Telethon(
+client = telethon.TelegramClient(
     StringSession(STRING_SESSION), API_ID, API_HASH, sequential_updates=True
 )
 
