@@ -41,7 +41,7 @@ MONGO_URI = "mongodb+srv://deepakkumar451811_db_user:z0gBb13CSvYAECgG@cluster0.o
 API_ID = 30366893
 API_HASH = "ecb01a29588b13c36c8c373584270ea8"
 
-# आपका नया जनरेट किया हुआ String Session (Directly Hardcoded)
+# आपका Session String
 SESSION_STRING = "1BVtsOIsBuy0WziD0rLnUDscaySskfhveyGx4zv0hYUqWI0RNfdIHU6eEyXFuTcszbb1xpwuec0H5-z2yAx2t2LQe6HDFqloLolKf2L5czt39pECanLIPjv2Le9tCEck2W991g_0bDk96jYZm7ZUVvQNRUo0Ka3XzMRPZyHynuwFlyTcvkYeZuREx9sDjo1vRFtA-NgX7Z5k9Mz-rg0ZVSmmXY1FbYj8ru-Gnmd_z-RxbbBfydbFFS_SVPkcJXJIkIC0HbG9QShsLGRIZazHyK25ATxnEcYjZYNW17PrLW6Ux0-2Yvx0q0WAvWKPIfGeIDwevfJuy8mvK0Wd6DpDmZEYzVJ26eUI="
 OWNER_USERNAME = "dklr145"
 
@@ -52,8 +52,14 @@ shows_col = db["custom_shows"]
 ott_col = db["custom_otts"]
 settings_col = db["bot_settings"]
 
-pyrogram_userbot = None
-tg_bot_app = None
+# Pyrogram UserBot Instance
+userbot = Client(
+    "dklr_userbot",
+    api_id=API_ID,
+    api_hash=API_HASH,
+    session_string=SESSION_STRING,
+    in_memory=True
+)
 
 WATERMARK_KEYWORDS = [
     "tvshowhub", "antoni", "webdlbot", "dg_contents", "dg_content",
@@ -252,71 +258,83 @@ def auto_save_file_to_db(clean_file_id, raw_name, target_date):
 
 # ----------------- BATCH ENGINE -----------------
 async def process_batch_from_id(chat_id, start_msg_id, target_id, reply_chat_id, context):
-    global pyrogram_userbot
-    if not pyrogram_userbot or not pyrogram_userbot.is_connected:
-        await context.bot.send_message(chat_id=reply_chat_id, text="❌ <b>UserBot एक्टिव नहीं है! कृपया 10 सेकंड रुकें।</b>", parse_mode="HTML")
-        return
+    if not userbot.is_connected:
+        try:
+            await userbot.start()
+        except Exception as e:
+            await context.bot.send_message(chat_id=reply_chat_id, text=f"❌ <b>UserBot Connect Error:</b> <code>{e}</code>", parse_mode="HTML")
+            return
 
     await context.bot.send_message(
         chat_id=reply_chat_id,
-        text=f"🚀 <b>Batch Processing शुरू हो गई है!</b>\n👉 मैसेज ID <code>{start_msg_id}</code> से प्रोसेस शुरू हो रहा है...",
+        text=f"🚀 <b>Batch Processing शुरू हो गई है!</b>\n👉 मैसेज ID <code>{start_msg_id}</code> से वीडियो डाउनलोड और प्रोसेस होना शुरू हो गया है...",
         parse_mode="HTML"
     )
 
     processed_count = 0
     try:
-        async for message in pyrogram_userbot.get_chat_history(chat_id):
+        # Collect messages from start_msg_id onwards
+        messages_to_process = []
+        async for message in userbot.get_chat_history(chat_id):
             if message.id < start_msg_id:
                 break
-
             if message.video or message.document:
-                input_file = None
-                output_file = None
-                raw_name = message.caption or (message.video and message.video.file_name) or (message.document and message.document.file_name) or "Episode_Video.mp4"
-                msg_date = extract_date_from_text(raw_name)
-                needs_cleaning = has_watermark(raw_name)
+                messages_to_process.append(message)
 
-                try:
-                    custom_caption = build_html_caption(raw_name)
-                    clean_file_id = None
+        # Process in chronological order (oldest to newest)
+        messages_to_process.reverse()
 
-                    if needs_cleaning:
-                        input_file = await message.download()
-                        output_file = f"clean_{os.path.basename(input_file)}"
-                        loop = asyncio.get_running_loop()
-                        await loop.run_in_executor(None, remove_watermark_ffmpeg, input_file, output_file)
-                        sent_msg = await pyrogram_userbot.send_document(chat_id=target_id, document=output_file, caption=custom_caption)
-                        clean_file_id = sent_msg.document.file_id if sent_msg.document else sent_msg.video.file_id
-                    else:
-                        sent_msg = await message.copy(chat_id=target_id, caption=custom_caption)
-                        clean_file_id = sent_msg.document.file_id if sent_msg.document else sent_msg.video.file_id
+        for message in messages_to_process:
+            input_file = None
+            output_file = None
+            raw_name = message.caption or (message.video and message.video.file_name) or (message.document and message.document.file_name) or "Episode_Video.mp4"
+            msg_date = extract_date_from_text(raw_name)
+            needs_cleaning = has_watermark(raw_name)
 
-                    processed_count += 1
+            try:
+                custom_caption = build_html_caption(raw_name)
+                clean_file_id = None
 
-                    if msg_date:
-                        matched_key, is_saved = auto_save_file_to_db(clean_file_id, raw_name, msg_date)
-                        if not is_saved:
-                            base_t = extract_base_title(raw_name)
-                            btn = InlineKeyboardMarkup([[InlineKeyboardButton(f"➕ Add '{base_t}'", callback_data="btn_add_show")]])
-                            await context.bot.send_message(chat_id=reply_chat_id, text=f"🚨 <b>Unmatched Show!</b>\n🎬 <b>Title:</b> {base_t}\n📅 <b>Date:</b> {msg_date.title()}\n👇 शो जोड़ने के लिए नीचे दबाएँ:", reply_markup=btn, parse_mode="HTML")
-                    else:
-                        if "missing_date_vids" not in context.user_data:
-                            context.user_data["missing_date_vids"] = []
-                        context.user_data["missing_date_vids"].append({"id": clean_file_id, "raw_name": raw_name})
-                        context.user_data["awaiting_missing_date"] = True
-                        await context.bot.send_message(chat_id=reply_chat_id, text=f"⚠️ <b>तारीख नहीं मिली!</b>\n🎬 <b>File:</b> {raw_name}\n\n✍️ <b>कृपया तारीख लिखकर भेजें (उदा: 16 August 2026):</b>", parse_mode="HTML")
+                if needs_cleaning:
+                    print(f"⚙️ [Batch] Cleaning watermark: {raw_name}")
+                    input_file = await message.download()
+                    output_file = f"clean_{os.path.basename(input_file)}"
+                    loop = asyncio.get_running_loop()
+                    await loop.run_in_executor(None, remove_watermark_ffmpeg, input_file, output_file)
+                    sent_msg = await userbot.send_document(chat_id=target_id, document=output_file, caption=custom_caption)
+                    clean_file_id = sent_msg.document.file_id if sent_msg.document else sent_msg.video.file_id
+                else:
+                    print(f"⚡️ [Batch] Direct send: {raw_name}")
+                    sent_msg = await message.copy(chat_id=target_id, caption=custom_caption)
+                    clean_file_id = sent_msg.document.file_id if sent_msg.document else sent_msg.video.file_id
 
-                except Exception as e:
-                    print(f"⚠️ [Batch File Error]: {e}")
-                finally:
-                    if input_file and os.path.exists(input_file):
-                        os.remove(input_file)
-                    if output_file and os.path.exists(output_file):
-                        os.remove(output_file)
+                processed_count += 1
 
-        await context.bot.send_message(chat_id=reply_chat_id, text=f"🎉 <b>Batch Complete!</b>\n✅ कुल <b>{processed_count} वीडियोस</b> टारगेट चैनल पर भेज दी गई हैं।", parse_mode="HTML")
+                if msg_date:
+                    matched_key, is_saved = auto_save_file_to_db(clean_file_id, raw_name, msg_date)
+                    if not is_saved:
+                        base_t = extract_base_title(raw_name)
+                        btn = InlineKeyboardMarkup([[InlineKeyboardButton(f"➕ Add '{base_t}'", callback_data="btn_add_show")]])
+                        await context.bot.send_message(chat_id=reply_chat_id, text=f"🚨 <b>Unmatched Show!</b>\n🎬 <b>Title:</b> {base_t}\n📅 <b>Date:</b> {msg_date.title()}\n👇 शो जोड़ने के लिए नीचे दबाएँ:", reply_markup=btn, parse_mode="HTML")
+                else:
+                    if "missing_date_vids" not in context.user_data:
+                        context.user_data["missing_date_vids"] = []
+                    context.user_data["missing_date_vids"].append({"id": clean_file_id, "raw_name": raw_name})
+                    context.user_data["awaiting_missing_date"] = True
+                    await context.bot.send_message(chat_id=reply_chat_id, text=f"⚠️ <b>तारीख नहीं मिली!</b>\n🎬 <b>File:</b> {raw_name}\n\n✍️ <b>कृपया तारीख लिखकर भेजें (उदा: 16 August 2026):</b>", parse_mode="HTML")
+
+            except Exception as e:
+                print(f"⚠️ [Batch File Error]: {e}")
+            finally:
+                if input_file and os.path.exists(input_file):
+                    os.remove(input_file)
+                if output_file and os.path.exists(output_file):
+                    os.remove(output_file)
+
+        await context.bot.send_message(chat_id=reply_chat_id, text=f"🎉 <b>Batch Complete!</b>\n✅ कुल <b>{processed_count} वीडियोस</b> सफलतापूर्वक टारगेट चैनल पर भेज दी गई हैं।", parse_mode="HTML")
     except Exception as e:
         print(f"❌ [Batch Error]: {e}")
+        await context.bot.send_message(chat_id=reply_chat_id, text=f"⚠️ <b>Batch Error:</b> <code>{e}</code>", parse_mode="HTML")
 
 def get_main_menu_keyboard():
     settings = get_bot_settings()
@@ -475,8 +493,14 @@ async def button_click(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 # ----------------- MAIN RUNNER -----------------
 async def main_async():
-    global tg_bot_app, pyrogram_userbot
+    print("🚀 Starting UserBot...")
+    try:
+        await userbot.start()
+        print("✅ [UserBot] Pyrogram Engine Active & Connected Successfully!")
+    except Exception as e:
+        print(f"⚠️ UserBot Start Error: {e}")
 
+    print("🚀 Starting Telegram Bot...")
     tg_bot_app = ApplicationBuilder().token(BOT_TOKEN).build()
     tg_bot_app.add_handler(CommandHandler("start", start_command))
     tg_bot_app.add_handler(MessageHandler((tg_filters.TEXT | tg_filters.FORWARDED) & ~tg_filters.COMMAND, handle_text))
@@ -486,19 +510,6 @@ async def main_async():
     await tg_bot_app.start()
     await tg_bot_app.updater.start_polling()
     print("✅ [Telegram Bot] Polling Active!")
-
-    try:
-        pyrogram_userbot = Client(
-            "dklr_userbot",
-            api_id=API_ID,
-            api_hash=API_HASH,
-            session_string=SESSION_STRING,
-            in_memory=True
-        )
-        await pyrogram_userbot.start()
-        print("✅ [UserBot] Pyrogram Engine Active & Connected Successfully!")
-    except Exception as e:
-        print(f"⚠️ UserBot Start Error: {e}")
 
     while True:
         await asyncio.sleep(3600)
