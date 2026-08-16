@@ -35,12 +35,14 @@ def keep_alive():
 
 keep_alive()
 
-# ----------------- CONFIG & DB -----------------
-BOT_TOKEN = os.environ.get("BOT_TOKEN", "8658926437:AAHnzF23ypbzIbZ-yATBhA0MHFGVOhVsTzA")
-MONGO_URI = os.environ.get("MONGO_URI", "mongodb+srv://deepakkumar451811_db_user:z0gBb13CSvYAECgG@cluster0.osysn1c.mongodb.net/?appName=Cluster0")
-API_ID = int(os.environ.get("API_ID", "30366893"))
-API_HASH = os.environ.get("API_HASH", "ecb01a29588b13c36c8c373584270ea8")
-SESSION_STRING = os.environ.get("SESSION_STRING", "")
+# ----------------- CONFIG & HARDCODED CREDENTIALS -----------------
+BOT_TOKEN = "8658926437:AAHnzF23ypbzIbZ-yATBhA0MHFGVOhVsTzA"
+MONGO_URI = "mongodb+srv://deepakkumar451811_db_user:z0gBb13CSvYAECgG@cluster0.osysn1c.mongodb.net/?appName=Cluster0"
+API_ID = 30366893
+API_HASH = "ecb01a29588b13c36c8c373584270ea8"
+
+# आपका नया जनरेट किया हुआ String Session (Directly Hardcoded)
+SESSION_STRING = "1BVtsOIsBuy0WziD0rLnUDscaySskfhveyGx4zv0hYUqWI0RNfdIHU6eEyXFuTcszbb1xpwuec0H5-z2yAx2t2LQe6HDFqloLolKf2L5czt39pECanLIPjv2Le9tCEck2W991g_0bDk96jYZm7ZUVvQNRUo0Ka3XzMRPZyHynuwFlyTcvkYeZuREx9sDjo1vRFtA-NgX7Z5k9Mz-rg0ZVSmmXY1FbYj8ru-Gnmd_z-RxbbBfydbFFS_SVPkcJXJIkIC0HbG9QShsLGRIZazHyK25ATxnEcYjZYNW17PrLW6Ux0-2Yvx0q0WAvWKPIfGeIDwevfJuy8mvK0Wd6DpDmZEYzVJ26eUI="
 OWNER_USERNAME = "dklr145"
 
 client = pymongo.MongoClient(MONGO_URI)
@@ -251,8 +253,8 @@ def auto_save_file_to_db(clean_file_id, raw_name, target_date):
 # ----------------- BATCH ENGINE -----------------
 async def process_batch_from_id(chat_id, start_msg_id, target_id, reply_chat_id, context):
     global pyrogram_userbot
-    if not pyrogram_userbot:
-        await context.bot.send_message(chat_id=reply_chat_id, text="❌ <b>UserBot एक्टिव नहीं है! SESSION_STRING चेक करें।</b>", parse_mode="HTML")
+    if not pyrogram_userbot or not pyrogram_userbot.is_connected:
+        await context.bot.send_message(chat_id=reply_chat_id, text="❌ <b>UserBot एक्टिव नहीं है! कृपया 10 सेकंड रुकें।</b>", parse_mode="HTML")
         return
 
     await context.bot.send_message(
@@ -485,13 +487,18 @@ async def main_async():
     await tg_bot_app.updater.start_polling()
     print("✅ [Telegram Bot] Polling Active!")
 
-    if SESSION_STRING:
-        try:
-            pyrogram_userbot = Client("dklr_userbot", api_id=API_ID, api_hash=API_HASH, session_string=SESSION_STRING)
-            await pyrogram_userbot.start()
-            print("✅ [UserBot] Pyrogram Engine Active!")
-        except Exception as e:
-            print(f"⚠️ UserBot Start Error: {e}")
+    try:
+        pyrogram_userbot = Client(
+            "dklr_userbot",
+            api_id=API_ID,
+            api_hash=API_HASH,
+            session_string=SESSION_STRING,
+            in_memory=True
+        )
+        await pyrogram_userbot.start()
+        print("✅ [UserBot] Pyrogram Engine Active & Connected Successfully!")
+    except Exception as e:
+        print(f"⚠️ UserBot Start Error: {e}")
 
     while True:
         await asyncio.sleep(3600)
