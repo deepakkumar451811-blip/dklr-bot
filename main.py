@@ -3,6 +3,7 @@ from datetime import datetime
 import io
 import os
 import re
+import subprocess
 from threading import Thread
 from flask import Flask
 import pymongo
@@ -49,9 +50,6 @@ MONGO_URI = os.environ.get(
 
 API_ID = int(os.environ.get("API_ID", "30366893"))
 API_HASH = os.environ.get("API_HASH", "ecb01a29588b13c36c8c373584270ea8")
-TARGET_BOT_USERNAME = "@autofiltertsh_bot"
-SOURCE_CHANNELS = ["tvshowhubb"]
-
 OWNER_USERNAME = "dklr145"
 
 client = pymongo.MongoClient(MONGO_URI)
@@ -59,6 +57,29 @@ db = client["dklr_bot_db"]
 video_col = db["videos"]
 shows_col = db["custom_shows"]
 ott_col = db["custom_otts"]
+settings_col = db["bot_settings"]
+
+
+# ----------------- SETTINGS MANAGEMENT -----------------
+def get_bot_settings():
+  settings = settings_col.find_one({"_id": "config"})
+  if not settings:
+    settings = {
+        "_id": "config",
+        "auto_receive": True,
+        "auto_send": True,
+        "source_channel_id": None,
+        "source_channel_name": "Not Set",
+        "target_channel_id": None,
+        "target_channel_name": "Not Set",
+    }
+    settings_col.insert_one(settings)
+  return settings
+
+
+def update_bot_setting(key, value):
+  settings_col.update_one({"_id": "config"}, {"$set": {key: value}}, upsert=True)
+
 
 DEFAULT_OTTS = [
     ("SunNXT", "sunnxt_p1"),
@@ -189,7 +210,6 @@ def extract_ep_and_quality(text):
 
 
 def extract_base_title(raw_name):
-  # Clean brand suffixes
   clean = re.sub(
       r"[-_.\s]*(TvShowHub|ANTONi|webdlbot|DG_Contents|DG_Content|UtsavTV|Nx-DRM-DL|DS_Ottwebdlbot|kairax007|ottwebdlbot|DKLR_DR|DKLRDR|DKLRShowhub)\b",
       "",
@@ -197,7 +217,6 @@ def extract_base_title(raw_name):
       flags=re.IGNORECASE,
   )
 
-  # Cut title before Episode or Quality keywords
   match = re.split(
       r"[._\s-]+(?:Season|Episode|Ep|E\d+|\d{3,4}p|Web|Dl|AAC)",
       clean,
@@ -205,7 +224,6 @@ def extract_base_title(raw_name):
   )
   title_part = match[0] if match else clean
 
-  # Replace dots, dashes, underscores with single space
   title_part = title_part.replace(".", " ").replace("-", " ").replace("_", " ")
   title_part = re.sub(r"\s+", " ", title_part).strip()
 
@@ -376,43 +394,153 @@ def build_html_caption(raw_name):
   )
 
 
+# ----------------- FFmpeg Delogo Watermark Remover -----------------
+def remove_watermark_ffmpeg(input_path, output_path):
+  cmd = [
+      "ffmpeg",
+      "-i",
+      input_path,
+      "-vf",
+      "delogo=x=30:y=H-160:w=320:h=120",
+      "-c:v",
+      "libx264",
+      "-preset",
+      "ultrafast",
+      "-crf",
+      "23",
+      "-c:a",
+      "copy",
+      output_path,
+      "-y",
+  ]
+  subprocess.run(cmd, check=True)
+
+
+def get_main_menu_keyboard():
+  settings = get_bot_settings()
+  rec_status = (
+      "🟢 Auto Receive: ON"
+      if settings.get("auto_receive", True)
+      else "🔴 Auto Receive: OFF"
+  )
+  send_status = (
+      "🟢 Auto Send: ON"
+      if settings.get("auto_send", True)
+      else "🔴 Auto Send: OFF"
+  )
+
+  src_name = settings.get("source_channel_name", "Not Set")
+  tgt_name = settings.get("target_channel_name", "Not Set")
+
+  buttons = [
+      [
+          InlineKeyboardButton("➕ Add New Show", callback_data="btn_add_show"),
+          InlineKeyboardButton("➕ Add New OTT", callback_data="btn_add_ott"),
+      ],
+      [
+          InlineKeyboardButton(rec_status, callback_data="toggle_auto_receive"),
+          InlineKeyboardButton(send_status, callback_data="toggle_auto_send"),
+      ],
+      [
+          InlineKeyboardButton(
+              f"📥 Source: {src_name}", callback_data="btn_set_receive_channel"
+          )
+      ],
+      [
+          InlineKeyboardButton(
+              f"📤 Target: {tgt_name}", callback_data="btn_set_send_channel"
+          )
+      ],
+  ]
+  return InlineKeyboardMarkup(buttons)
+
+
 async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
   if update.message:
-    buttons = [
-        [
-            InlineKeyboardButton("➕ Add New Show", callback_data="btn_add_show"),
-            InlineKeyboardButton("➕ Add New OTT", callback_data="btn_add_ott"),
-        ]
-    ]
     await update.message.reply_text(
-        "<b>नमस्ते भाई! कृपया कोई तारीख लिखकर भेजें (जैसे: 01 August 2026)।</b>\n\n"
-        "👇 <b>नया शो या OTT प्लेटफ़ॉर्म जोड़ने के लिए नीचे दिए बटन दबाएँ:</b>",
-        reply_markup=InlineKeyboardMarkup(buttons),
+        "<b>नमस्ते भाई! DKLR Show Hub Control Panel में आपका स्वागत है।</b>\n\n"
+        "👉 किसी चैनल से ऑटो-रिसीव करने के लिए नीचे <b>Source</b> बटन दबाकर एक"
+        " SMS फॉरवर्ड करें।\n"
+        "👉 ऑटो-सेंड करने के लिए <b>Target</b> बटन दबाकर टारगेट चैनल/ग्रुप से एक"
+        " SMS फॉरवर्ड करें।\n\n"
+        "👇 <b>कंट्रोल पैनल:</b>",
+        reply_markup=get_main_menu_keyboard(),
         parse_mode="HTML",
     )
 
 
+# ----------------- VIDEO UPLOAD HANDLER -----------------
 async def handle_video_upload(
     update: Update, context: ContextTypes.DEFAULT_TYPE
 ):
-  if update.message and update.message.video:
-    file_id = update.message.video.file_id
-    raw_name = (
-        update.message.caption or update.message.video.file_name or ""
+  if update.message and (update.message.video or update.message.document):
+    # Check if this forward is meant for setting channel
+    if context.user_data.get("setting_receive_channel") or context.user_data.get(
+        "setting_send_channel"
+    ):
+      await handle_text(update, context)
+      return
+
+    msg = await update.message.reply_text(
+        "⚙️ <b>वीडियो प्रोसेस हो रही है और वॉटरमार्क हटाया जा रहा है... कृपया"
+        " प्रतीक्षा करें!</b>",
+        parse_mode="HTML",
     )
+
+    raw_name = (
+        update.message.caption
+        or (update.message.video and update.message.video.file_name)
+        or (update.message.document and update.message.document.file_name)
+        or "Episode_Video.mp4"
+    )
+
+    input_file = None
+    output_file = None
+    clean_file_id = None
+
+    try:
+      target_obj = update.message.video or update.message.document
+      tg_file = await context.bot.get_file(target_obj.file_id)
+      input_file = f"temp_{target_obj.file_id[:10]}.mp4"
+      output_file = f"clean_{target_obj.file_id[:10]}.mp4"
+
+      await tg_file.download_to_drive(input_file)
+
+      loop = asyncio.get_running_loop()
+      await loop.run_in_executor(
+          None, remove_watermark_ffmpeg, input_file, output_file
+      )
+
+      sent_clean = await context.bot.send_video(
+          chat_id=update.effective_chat.id,
+          video=open(output_file, "rb"),
+          caption=f"✅ <b>Clean (Watermark Removed):</b> {raw_name}",
+          parse_mode="HTML",
+      )
+      clean_file_id = sent_clean.video.file_id
+
+    except Exception as e:
+      print(f"⚠️ [Delogo Fallback]: {e}")
+      clean_file_id = target_obj.file_id
+
+    finally:
+      if input_file and os.path.exists(input_file):
+        os.remove(input_file)
+      if output_file and os.path.exists(output_file):
+        os.remove(output_file)
 
     if "pending_videos" not in context.user_data:
       context.user_data["pending_videos"] = []
 
     context.user_data["pending_videos"].append({
-        "id": file_id,
+        "id": clean_file_id,
         "raw_name": raw_name,
     })
     context.user_data["awaiting_upload_date"] = True
 
     total_rec = len(context.user_data["pending_videos"])
-    await update.message.reply_text(
-        f"🎥 <b>वीडियो प्राप्त हो गई! (कुल: {total_rec})</b>\n\n"
+    await msg.edit_text(
+        f"🎥 <b>क्लीन वीडियो सेव हो गई! (कुल: {total_rec})</b>\n\n"
         "✍️ <b>कृपया तारीख लिखकर भेजें (जैसे: 01 August 2026):</b>",
         parse_mode="HTML",
     )
@@ -433,7 +561,6 @@ async def save_manual_show_to_db(
   if show_key not in existing_shows:
     existing_shows[show_key] = []
 
-  # SAVE ALL QUALITY FILES ACCURATELY
   for new_v in vid_list:
     new_ep, new_q = extract_ep_and_quality(new_v["raw_name"])
     replaced = False
@@ -449,30 +576,95 @@ async def save_manual_show_to_db(
       existing_shows[show_key].append(new_v)
 
   if not doc:
-    video_col.insert_one(
-        {"date": target_date.lower(), "shows": existing_shows}
-    )
+    video_col.insert_one({"date": target_date.lower(), "shows": existing_shows})
   else:
-    video_col.update_one({"_id": doc["_id"]}, {"$set": {"shows": existing_shows}})
+    video_col.update_one(
+        {"_id": doc["_id"]}, {"$set": {"shows": existing_shows}}
+    )
 
   display_ott = ott_tag.split("_")[0].upper()
   return (
       f"✅ <b>नया शो सफ़लतापूर्वक ऐडेड!</b>\n\n"
       f"🎬 <b>Show Name:</b> {show_name}\n"
       f"📺 <b>OTT:</b> {display_ott}\n"
-      f"📁 <b>Total Files Saved:</b> {len(existing_shows[show_key])} Videos (All Quality)\n"
+      f"📁 <b>Total Files Saved:</b> {len(existing_shows[show_key])} Videos (All"
+      " Quality)\n"
       f"📅 <b>Date:</b> {target_date.title()}\n\n"
       "🎉 <b>अब ये सभी वीडियोस इस एक शो के बटन में खुलेंगी!</b>"
   )
 
 
+# ----------------- MESSAGE & FORWARD HANDLER -----------------
 async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
-  if not update.message or not update.message.text:
+  if not update.message:
     return
 
-  text = update.message.text.strip()
+  msg = update.message
+  text = (msg.text or "").strip()
 
-  # 1. ADD NEW OTT NAME
+  # 1. SET SOURCE CHANNEL VIA ONE FORWARDED MESSAGE OR USERNAME
+  if context.user_data.get("setting_receive_channel"):
+    ch_id = None
+    ch_title = None
+
+    if msg.forward_from_chat:
+      ch_id = msg.forward_from_chat.id
+      ch_title = (
+          msg.forward_from_chat.title
+          or msg.forward_from_chat.username
+          or str(ch_id)
+      )
+    elif text:
+      ch_title = text.replace("https://t.me/", "").replace("@", "").strip()
+      ch_id = ch_title
+
+    if ch_id:
+      update_bot_setting("source_channel_id", ch_id)
+      update_bot_setting("source_channel_name", ch_title)
+      context.user_data["setting_receive_channel"] = False
+      await msg.reply_text(
+          f"🎯 <b>Source Channel सेट हो गया:</b> <code>{ch_title}</code>\n"
+          f"🆔 <b>Channel ID:</b> <code>{ch_id}</code>\n\n"
+          "⚡️ <b>अब इस चैनल पर जब भी कोई नई वीडियो अपलोड होगी, बॉट उसे ऑटोमैटिक"
+          " रिसीव करेगा!</b>",
+          reply_markup=get_main_menu_keyboard(),
+          parse_mode="HTML",
+      )
+      return
+
+  # 2. SET TARGET CHANNEL VIA ONE FORWARDED MESSAGE OR USERNAME
+  if context.user_data.get("setting_send_channel"):
+    target_id = None
+    target_title = None
+
+    if msg.forward_from_chat:
+      target_id = msg.forward_from_chat.id
+      target_title = (
+          msg.forward_from_chat.title
+          or msg.forward_from_chat.username
+          or str(target_id)
+      )
+    elif text:
+      target_title = (
+          "@" + text.replace("https://t.me/", "").replace("@", "").strip()
+      )
+      target_id = target_title
+
+    if target_id:
+      update_bot_setting("target_channel_id", target_id)
+      update_bot_setting("target_channel_name", target_title)
+      context.user_data["setting_send_channel"] = False
+      await msg.reply_text(
+          f"🎯 <b>Target Channel सेट हो गया:</b> <code>{target_title}</code>\n"
+          f"🆔 <b>Target ID:</b> <code>{target_id}</code>\n\n"
+          "⚡️ <b>अब बॉट वॉटरमार्क हटाने के बाद क्लीन वीडियो सीधे इस चैनल/बॉट"
+          " पर सेंड करेगा!</b>",
+          reply_markup=get_main_menu_keyboard(),
+          parse_mode="HTML",
+      )
+      return
+
+  # 3. ADD NEW OTT NAME
   if context.user_data.get("adding_new_ott_mode"):
     ott_name = text.strip()
     ott_tag = ott_name.lower().replace(" ", "") + "_p1"
@@ -481,7 +673,7 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         {"tag": ott_tag}, {"$set": {"name": ott_name, "tag": ott_tag}}, upsert=True
     )
     context.user_data["adding_new_ott_mode"] = False
-    await update.message.reply_text(
+    await msg.reply_text(
         f"✅ <b>नया OTT प्लेटफ़ॉर्म सफलतापूर्वक जोड़ा गया!</b>\n\n"
         f"📺 <b>OTT Name:</b> {ott_name}\n\n"
         "🎉 <b>अब जब भी इस OTT का शो अपलोड होगा, यह ऑटो-शो होने लगेगा!</b>",
@@ -489,7 +681,7 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
     return
 
-  # 2. ADD NEW SHOW NAME -> CHOOSE OTT
+  # 4. ADD NEW SHOW NAME
   if context.user_data.get("adding_new_show_step1"):
     show_name = text.strip().title()
     show_key = show_name.lower().replace(" ", "_")
@@ -504,7 +696,7 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
           [InlineKeyboardButton(o_name, callback_data=f"save_show_ott|{o_tag}")]
       )
 
-    await update.message.reply_text(
+    await msg.reply_text(
         f"🎬 <b>Show Name:</b> {show_name}\n\n"
         "👇 <b>कृपया इस शो के लिए सही OTT सेलेक्ट करें:</b>",
         reply_markup=InlineKeyboardMarkup(ott_buttons),
@@ -512,7 +704,7 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
     return
 
-  # 3. MANUAL UNMATCHED SHOW NAME -> AUTO-DETECT OTT OR ASK
+  # 5. MANUAL UNMATCHED SHOW NAME
   if context.user_data.get("adding_manual_show"):
     show_name = text.title()
     show_key = show_name.lower().replace(" ", "_")
@@ -534,7 +726,7 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
           target_date,
           vid_list,
       )
-      await update.message.reply_text(res_msg, parse_mode="HTML")
+      await msg.reply_text(res_msg, parse_mode="HTML")
     else:
       context.user_data["temp_m_show_name"] = show_name
       context.user_data["temp_m_show_key"] = show_key
@@ -548,7 +740,7 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
             )
         ])
 
-      await update.message.reply_text(
+      await msg.reply_text(
           f"🎬 <b>Show Name:</b> {show_name}\n\n"
           "👇 <b>कृपया इस शो के लिए OTT प्लेटफ़ॉर्म चुनें:</b>",
           reply_markup=InlineKeyboardMarkup(ott_buttons),
@@ -556,7 +748,7 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
       )
     return
 
-  # 4. DATE ENTRY AFTER UPLOAD
+  # 6. DATE ENTRY AFTER UPLOAD
   if context.user_data.get("awaiting_upload_date"):
     target_date = text.lower().strip()
     context.user_data["awaiting_upload_date"] = False
@@ -604,18 +796,18 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
           {"$set": {"date": target_date, "shows": existing_shows}},
       )
 
-    msg = f"✅ <b>तारीख सेट हो गई:</b> <b>{target_date.title()}</b>\n\n"
-    msg += (
+    out_msg = f"✅ <b>तारीख सेट हो गई:</b> <b>{target_date.title()}</b>\n\n"
+    out_msg += (
         f"🤖 <b>सफलतापूर्वक प्रोसेस हुए:</b> <b>{auto_saved} वीडियोस</b>\n"
     )
 
     if replaced_count > 0:
-      msg += (
+      out_msg += (
           f"🔄 <b>सेम क्वालिटी/एपिसोड होने के कारण रिप्लेस किए गए:</b>"
           f" <b>{replaced_count} वीडियोस</b>\n"
       )
 
-    await update.message.reply_text(msg, parse_mode="HTML")
+    await msg.reply_text(out_msg, parse_mode="HTML")
 
     if unmatched_list:
       clean_date_tag = target_date.replace(" ", "_")
@@ -651,14 +843,14 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
           "\n👇 <b>शो जोड़ने के लिए ऊपर दिए संबंधित बटन दबाएँ:</b>"
       )
 
-      await update.message.reply_text(
+      await msg.reply_text(
           unmatch_info,
           reply_markup=InlineKeyboardMarkup(buttons),
           parse_mode="HTML",
       )
     return
 
-  # 5. USER SEARCHING DATE
+  # 7. USER SEARCHING DATE
   months = [
       "january",
       "february",
@@ -695,7 +887,7 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
               "🚀 Main Channel", url="https://t.me/+AT1UIPpK3c04MTk1"
           )
       ]])
-      await update.message.reply_text(
+      await msg.reply_text(
           "🚫 <b>Sorry! You cannot watch today's episode here.</b>\n"
           "👉 <b>Please go to our Main Channel and watch today's episode from"
           " there.</b>\n\n"
@@ -726,7 +918,7 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     if buttons:
       buttons.append([InlineKeyboardButton("❌ Close", callback_data="close")])
-      await update.message.reply_text(
+      await msg.reply_text(
           "✅ <b>Data fetched successfully!</b>\n\n"
           f"📅 <b>Date Requested:</b>\n<b>{text.title()}</b>\n\n"
           "🔍 <b>Please choose your desired OTT below:</b>",
@@ -734,7 +926,7 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
           parse_mode="HTML",
       )
     else:
-      await update.message.reply_text(
+      await msg.reply_text(
           f"❌ <b>इस तारीख ({text.title()}) में कोई भी वीडियो उपलब्ध नहीं"
           " है!</b>",
           parse_mode="HTML",
@@ -749,6 +941,46 @@ async def button_click(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
   if data == "close":
     await query.message.delete()
+    return
+
+  # TOGGLE BUTTONS HANDLERS
+  elif data == "toggle_auto_receive":
+    settings = get_bot_settings()
+    new_val = not settings.get("auto_receive", True)
+    update_bot_setting("auto_receive", new_val)
+    status_str = "🟢 ON" if new_val else "🔴 OFF"
+    await query.message.edit_reply_markup(reply_markup=get_main_menu_keyboard())
+    await query.answer(f"Auto Receive set to: {status_str}", show_alert=True)
+    return
+
+  elif data == "toggle_auto_send":
+    settings = get_bot_settings()
+    new_val = not settings.get("auto_send", True)
+    update_bot_setting("auto_send", new_val)
+    status_str = "🟢 ON" if new_val else "🔴 OFF"
+    await query.message.edit_reply_markup(reply_markup=get_main_menu_keyboard())
+    await query.answer(f"Auto Send set to: {status_str}", show_alert=True)
+    return
+
+  # ONE-TIME FORWARD TRIGGERS
+  elif data == "btn_set_receive_channel":
+    context.user_data["setting_receive_channel"] = True
+    await query.message.reply_text(
+        "📥 <b>Source Channel सेट करें:</b>\n\n"
+        "👉 जिस चैनल से वीडियो रिसीव करनी है, उस चैनल से <b>कोई भी एक SMS या"
+        " Video Forward</b> कर दीजिए।",
+        parse_mode="HTML",
+    )
+    return
+
+  elif data == "btn_set_send_channel":
+    context.user_data["setting_send_channel"] = True
+    await query.message.reply_text(
+        "📤 <b>Target Channel सेट करें:</b>\n\n"
+        "👉 जिस चैनल पर क्लीन वीडियो भेजनी है, उस चैनल से <b>कोई भी एक SMS या"
+        " Video Forward</b> कर दीजिए।",
+        parse_mode="HTML",
+    )
     return
 
   elif data == "btn_add_show":
@@ -920,8 +1152,8 @@ async def button_click(update: Update, context: ContextTypes.DEFAULT_TYPE):
       notice_text = (
           "╭─────── ‼️ <b>Auto-Delete Notice</b> ‼️ ───────╮\n\n"
           "🚨 <b>Make sure to save the video!</b>\n"
-          "⏰ <b>Videos Will Be Auto-deleted After 60 minutes to avoid copyright"
-          " issue</b> ⌛\n"
+          "⏰ <b>Videos Will Be Auto-deleted After 60 minutes to avoid"
+          " copyright issue</b> ⌛\n"
           "📬 <b>Forward it to Saved Messages and Watch there</b>\n\n"
           "╰────────────────────────────────────╯"
       )
@@ -954,15 +1186,70 @@ async def start_userbot():
       in_memory=True,
   )
 
-  @userbot.on_message(
-      filters.chat(SOURCE_CHANNELS) & (filters.video | filters.document)
-  )
-  async def forward_video(client, message):
+  @userbot.on_message(filters.video | filters.document)
+  async def process_channel_video(client, message):
+    settings = get_bot_settings()
+
+    # 1. Auto-Receive Status Check
+    if not settings.get("auto_receive", True):
+      return
+
+    # 2. Source Channel ID Match
+    saved_src_id = settings.get("source_channel_id")
+    if not saved_src_id:
+      return
+
+    current_chat_id = message.chat.id
+    current_chat_username = (message.chat.username or "").lower()
+
+    # Match ID directly or by username
+    if (str(saved_src_id) != str(current_chat_id)) and (
+        str(saved_src_id).lower() != current_chat_username
+    ):
+      return
+
+    input_file = None
+    output_file = None
+    target_dest = settings.get("target_channel_id")
+
     try:
-      await message.forward(TARGET_BOT_USERNAME)
-      print("✅ [UserBot] Auto-forwarded video successfully!")
+      print(f"📥 [UserBot] Auto-receiving new video from {message.chat.title}...")
+      input_file = await message.download()
+      output_file = f"clean_{os.path.basename(input_file)}"
+
+      print("⚙️ [UserBot] Removing watermark using FFmpeg...")
+      loop = asyncio.get_running_loop()
+      await loop.run_in_executor(
+          None, remove_watermark_ffmpeg, input_file, output_file
+      )
+
+      # 3. Auto-Send Status & Send Target
+      if settings.get("auto_send", True) and target_dest:
+        print(f"📤 [UserBot] Auto-sending clean video to {target_dest}...")
+        caption = message.caption or ""
+        await client.send_document(
+            chat_id=target_dest,
+            document=output_file,
+            caption=caption,
+        )
+        print("✅ [UserBot] Clean video sent successfully!")
+      else:
+        print("⏸️ [UserBot] Auto-Send is OFF or Target not set.")
+
     except Exception as e:
-      print(f"❌ [UserBot Error]: {e}")
+      print(f"⚠️ [UserBot Processing Error]: {e}")
+      if settings.get("auto_send", True) and target_dest:
+        try:
+          await message.forward(target_dest)
+          print("⚠️ [UserBot] Fallback: Original forwarded.")
+        except Exception as f_err:
+          print(f"❌ [UserBot Fallback Error]: {f_err}")
+
+    finally:
+      if input_file and os.path.exists(input_file):
+        os.remove(input_file)
+      if output_file and os.path.exists(output_file):
+        os.remove(output_file)
 
   try:
     print("🚀 [UserBot] Starting Engine...")
@@ -980,9 +1267,16 @@ def main():
 
   tg_app = ApplicationBuilder().token(BOT_TOKEN).build()
   tg_app.add_handler(CommandHandler("start", start_command))
-  tg_app.add_handler(MessageHandler(tg_filters.VIDEO, handle_video_upload))
   tg_app.add_handler(
-      MessageHandler(tg_filters.TEXT & ~tg_filters.COMMAND, handle_text)
+      MessageHandler(
+          tg_filters.VIDEO | tg_filters.Document.VIDEO, handle_video_upload
+      )
+  )
+  tg_app.add_handler(
+      MessageHandler(
+          (tg_filters.TEXT | tg_filters.FORWARDED) & ~tg_filters.COMMAND,
+          handle_text,
+      )
   )
   tg_app.add_handler(CallbackQueryHandler(button_click))
 
