@@ -18,7 +18,7 @@ from telegram.ext import (
     filters as tg_filters,
 )
 
-# ----------------- FLASK SERVER FOR RENDER (KEEP-ALIVE) -----------------
+# ----------------- FLASK SERVER (KEEP-ALIVE) -----------------
 app_flask = Flask(__name__)
 
 
@@ -39,7 +39,7 @@ def keep_alive():
 
 keep_alive()
 
-# ----------------- CONFIG & MONGODB SETUP -----------------
+# ----------------- CONFIG & DB -----------------
 BOT_TOKEN = os.environ.get(
     "BOT_TOKEN", "8658926437:AAHnzF23ypbzIbZ-yATBhA0MHFGVOhVsTzA"
 )
@@ -47,9 +47,9 @@ MONGO_URI = os.environ.get(
     "MONGO_URI",
     "mongodb+srv://deepakkumar451811_db_user:z0gBb13CSvYAECgG@cluster0.osysn1c.mongodb.net/?appName=Cluster0",
 )
-
 API_ID = int(os.environ.get("API_ID", "30366893"))
 API_HASH = os.environ.get("API_HASH", "ecb01a29588b13c36c8c373584270ea8")
+SESSION_STRING = os.environ.get("SESSION_STRING", "")
 OWNER_USERNAME = "dklr145"
 
 client = pymongo.MongoClient(MONGO_URI)
@@ -58,6 +58,9 @@ video_col = db["videos"]
 shows_col = db["custom_shows"]
 ott_col = db["custom_otts"]
 settings_col = db["bot_settings"]
+
+pyrogram_userbot = None
+tg_bot_app = None
 
 
 # ----------------- SETTINGS MANAGEMENT -----------------
@@ -72,6 +75,7 @@ def get_bot_settings():
         "source_channel_name": "Not Set",
         "target_channel_id": None,
         "target_channel_name": "Not Set",
+        "admin_chat_id": None,
     }
     settings_col.insert_one(settings)
   return settings
@@ -183,13 +187,12 @@ def find_db_doc_by_date(date_str):
   if not date_str:
     return None
   clean_date = date_str.strip().lower()
-
   if re.match(r"^0\d", clean_date):
     alt_date = re.sub(r"^0(\d)", r"\1", clean_date)
   else:
     alt_date = re.sub(r"^(\d\s)", r"0\1", clean_date)
 
-  doc = video_col.find_one({
+  return video_col.find_one({
       "$or": [
           {"date": clean_date},
           {"date": alt_date},
@@ -197,16 +200,31 @@ def find_db_doc_by_date(date_str):
           {"date": {"$regex": f"^{alt_date}$", "$options": "i"}},
       ]
   })
-  return doc
 
 
 def extract_ep_and_quality(text):
   ep_match = re.search(r"(?:ep|episode|e)[._\s-]*(\d+)", text, re.IGNORECASE)
   q_match = re.search(r"(\d{3,4}p)", text, re.IGNORECASE)
-
   ep = ep_match.group(1) if ep_match else "0"
   quality = q_match.group(1).lower() if q_match else "default"
   return ep, quality
+
+
+def extract_date_from_text(text):
+  if not text:
+    return None
+  months_pattern = r"(january|february|march|april|may|june|july|august|september|october|november|december|jan|feb|mar|apr|jun|jul|aug|sep|oct|nov|dec)"
+  match = re.search(
+      rf"(\d{{1,2}}\s+{months_pattern}(?:\s+\d{{4}})?|\d{{1,2}}[-/.]{months_pattern}[-/.]\d{{2,4}})",
+      text,
+      re.IGNORECASE,
+  )
+  if match:
+    raw_d = match.group(1)
+    if not re.search(r"\d{4}", raw_d):
+      raw_d += f" {datetime.now().year}"
+    return raw_d.lower().strip()
+  return None
 
 
 def extract_base_title(raw_name):
@@ -216,20 +234,15 @@ def extract_base_title(raw_name):
       raw_name,
       flags=re.IGNORECASE,
   )
-
   match = re.split(
       r"[._\s-]+(?:Season|Episode|Ep|E\d+|\d{3,4}p|Web|Dl|AAC)",
       clean,
       flags=re.IGNORECASE,
   )
   title_part = match[0] if match else clean
-
   title_part = title_part.replace(".", " ").replace("-", " ").replace("_", " ")
   title_part = re.sub(r"\s+", " ", title_part).strip()
-
-  if not title_part or len(title_part) < 2:
-    title_part = "Unmatched Show"
-  return title_part.title()
+  return title_part.title() if title_part else "Unmatched Show"
 
 
 def detect_ott_tag(caption):
@@ -279,17 +292,14 @@ def detect_ott_tag(caption):
     return "sonyliv_p1"
   elif "SUNNXT" in text or ".SN." in text:
     return "sunnxt_p1"
-
   for c in ott_col.find():
     if c["name"].upper() in text:
       return c["tag"]
-
   return None
 
 
 def match_show(caption):
   clean_caption = caption.replace("_", " ").replace(".", " ").lower()
-
   if "shivmay" in clean_caption or "shravan" in clean_caption:
     return "shivmay_shravan"
 
@@ -351,13 +361,11 @@ def match_show(caption):
   for pattern, s_key in exact_map.items():
     if pattern in clean_caption:
       return s_key
-
   customs = shows_col.find()
   for c in customs:
     c_name = c["name"].lower().replace("-", " ")
     if len(c_name) > 3 and c_name in clean_caption:
       return c["key"]
-
   return None
 
 
@@ -368,20 +376,16 @@ def build_html_caption(raw_name):
       .replace(">", "&gt;")
       .strip()
   )
-
   base_name = re.sub(
       r"\.(mp4|mkv|avi|mov|webm|flv)$", "", clean_name, flags=re.IGNORECASE
   )
-
   base_name = re.sub(
       r"[-_.\s]+(TvShowHub|ANTONi|webdlbot|DG_Contents|DG_Content|UtsavTV|Nx-DRM-DL|DS_Ottwebdlbot|kairax007|ottwebdlbot|DKLR_DR|DKLRDR|DKLRShowhub)[-_.\s]*$",
       "",
       base_name,
       flags=re.IGNORECASE,
   )
-
   base_name = re.sub(r"[-_]+[a-zA-Z0-9]+$", "", base_name)
-
   final_filename = f"{base_name.strip('.-_')}.DKLRShowhub.mp4"
 
   return (
@@ -416,6 +420,165 @@ def remove_watermark_ffmpeg(input_path, output_path):
   subprocess.run(cmd, check=True)
 
 
+# ----------------- AUTO SAVE TO DB LOGIC -----------------
+def auto_save_file_to_db(clean_file_id, raw_name, target_date):
+  matched_key = match_show(raw_name)
+  target_date = target_date.lower().strip()
+
+  doc = find_db_doc_by_date(target_date)
+  existing_shows = doc.get("shows", {}) if doc else {}
+
+  vid_obj = {"id": clean_file_id, "raw_name": raw_name}
+
+  if matched_key:
+    if matched_key not in existing_shows:
+      existing_shows[matched_key] = []
+
+    new_ep, new_q = extract_ep_and_quality(raw_name)
+    is_replaced = False
+    for idx, old_vid in enumerate(existing_shows[matched_key]):
+      old_ep, old_q = extract_ep_and_quality(old_vid["raw_name"])
+      if old_ep == new_ep and old_q == new_q:
+        existing_shows[matched_key][idx] = vid_obj
+        is_replaced = True
+        break
+
+    if not is_replaced:
+      existing_shows[matched_key].append(vid_obj)
+
+    if not doc:
+      video_col.insert_one({"date": target_date, "shows": existing_shows})
+    else:
+      video_col.update_one(
+          {"_id": doc["_id"]},
+          {"$set": {"date": target_date, "shows": existing_shows}},
+      )
+    return matched_key, True
+  return None, False
+
+
+# ----------------- BATCH FORWARD & CLEAN LOGIC -----------------
+async def process_batch_from_id(
+    chat_id, start_msg_id, target_id, reply_chat_id, context
+):
+  global pyrogram_userbot
+  if not pyrogram_userbot:
+    await context.bot.send_message(
+        chat_id=reply_chat_id,
+        text="❌ <b>UserBot एक्टिव नहीं है! SESSION_STRING चेक करें।</b>",
+        parse_mode="HTML",
+    )
+    return
+
+  await context.bot.send_message(
+      chat_id=reply_chat_id,
+      text=(
+          f"🚀 <b>Batch Cleaner शुरू!</b>\n👉 मैसेज ID <code>{start_msg_id}</code> के"
+          " बाद की सभी वीडियोज वॉटरमार्क हटकर टारगेट चैनल और डेटाबेस में ऐड"
+          " होंगी..."
+      ),
+      parse_mode="HTML",
+  )
+
+  processed_count = 0
+  try:
+    async for message in pyrogram_userbot.get_chat_history(chat_id):
+      if message.id < start_msg_id:
+        break
+
+      if message.video or message.document:
+        input_file = None
+        output_file = None
+        raw_name = (
+            message.caption
+            or (message.video and message.video.file_name)
+            or (message.document and message.document.file_name)
+            or "Episode_Video.mp4"
+        )
+        msg_date = extract_date_from_text(raw_name)
+
+        try:
+          input_file = await message.download()
+          output_file = f"clean_{os.path.basename(input_file)}"
+
+          loop = asyncio.get_running_loop()
+          await loop.run_in_executor(
+              None, remove_watermark_ffmpeg, input_file, output_file
+          )
+
+          # Your Custom Caption Added
+          custom_caption = build_html_caption(raw_name)
+          sent_msg = await pyrogram_userbot.send_document(
+              chat_id=target_id, document=output_file, caption=custom_caption
+          )
+          processed_count += 1
+
+          clean_file_id = (
+              sent_msg.document.file_id
+              if sent_msg.document
+              else sent_msg.video.file_id
+          )
+
+          # Auto Save to DB if Date Exists
+          if msg_date:
+            matched_key, is_saved = auto_save_file_to_db(
+                clean_file_id, raw_name, msg_date
+            )
+            if not is_saved:
+              base_t = extract_base_title(raw_name)
+              btn = InlineKeyboardMarkup([[
+                  InlineKeyboardButton(
+                      f"➕ Add '{base_t}'", callback_data="btn_add_show"
+                  )
+              ]])
+              await context.bot.send_message(
+                  chat_id=reply_chat_id,
+                  text=(
+                      f"🚨 <b>Unmatched Show!</b>\n🎬 <b>Title:</b> {base_t}\n📅"
+                      f" <b>Date:</b> {msg_date.title()}\n👇 शो जोड़ने के लिए"
+                      " नीचे दबाएँ:"
+                  ),
+                  reply_markup=btn,
+                  parse_mode="HTML",
+              )
+          else:
+            # Date Missing Prompt
+            if "missing_date_vids" not in context.user_data:
+              context.user_data["missing_date_vids"] = []
+            context.user_data["missing_date_vids"].append(
+                {"id": clean_file_id, "raw_name": raw_name}
+            )
+            context.user_data["awaiting_missing_date"] = True
+            await context.bot.send_message(
+                chat_id=reply_chat_id,
+                text=(
+                    f"⚠️ <b>तारीख नहीं मिली!</b>\n🎬 <b>File:</b> {raw_name}\n\n✍️"
+                    " <b>कृपया इस वीडियो के लिए तारीख लिखकर भेजें (उदा: 16"
+                    " August 2026):</b>"
+                ),
+                parse_mode="HTML",
+            )
+
+        except Exception as e:
+          print(f"⚠️ [Batch File Error]: {e}")
+        finally:
+          if input_file and os.path.exists(input_file):
+            os.remove(input_file)
+          if output_file and os.path.exists(output_file):
+            os.remove(output_file)
+
+    await context.bot.send_message(
+        chat_id=reply_chat_id,
+        text=(
+            f"🎉 <b>Batch Complete!</b>\n✅ कुल <b>{processed_count} वीडियोस</b>"
+            " आपके कस्टम टाइटल के साथ टारगेट चैनल पर भेज दी गई हैं।"
+        ),
+        parse_mode="HTML",
+    )
+  except Exception as e:
+    print(f"❌ [Batch Error]: {e}")
+
+
 def get_main_menu_keyboard():
   settings = get_bot_settings()
   rec_status = (
@@ -428,7 +591,6 @@ def get_main_menu_keyboard():
       if settings.get("auto_send", True)
       else "🔴 Auto Send: OFF"
   )
-
   src_name = settings.get("source_channel_name", "Not Set")
   tgt_name = settings.get("target_channel_name", "Not Set")
 
@@ -451,147 +613,29 @@ def get_main_menu_keyboard():
               f"📤 Target: {tgt_name}", callback_data="btn_set_send_channel"
           )
       ],
+      [
+          InlineKeyboardButton(
+              "⚡️ Start Batch From Forwarded Msg",
+              callback_data="btn_start_batch",
+          )
+      ],
   ]
   return InlineKeyboardMarkup(buttons)
 
 
 async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
   if update.message:
+    update_bot_setting("admin_chat_id", update.effective_chat.id)
     await update.message.reply_text(
-        "<b>नमस्ते भाई! DKLR Show Hub Control Panel में आपका स्वागत है।</b>\n\n"
-        "👉 किसी चैनल से ऑटो-रिसीव करने के लिए नीचे <b>Source</b> बटन दबाकर एक"
-        " SMS फॉरवर्ड करें।\n"
-        "👉 ऑटो-सेंड करने के लिए <b>Target</b> बटन दबाकर टारगेट चैनल/ग्रुप से एक"
-        " SMS फॉरवर्ड करें।\n\n"
+        "<b>नमस्ते भाई! DKLR Show Hub Engine Live!</b>\n\n"
+        "👉 सोर्स चैनल की सभी वीडियोज वॉटरमार्क हटकर, आपका कस्टम टाइटल लगकर सीधे"
+        " टारगेट चैनल पर जाएँगी।\n"
+        "👉 तारीख मिलने पर डेटाबेस में अपने आप ऐड होगी, न मिलने पर बॉट आपसे तारीख"
+        " माँगेगा।\n\n"
         "👇 <b>कंट्रोल पैनल:</b>",
         reply_markup=get_main_menu_keyboard(),
         parse_mode="HTML",
     )
-
-
-# ----------------- VIDEO UPLOAD HANDLER -----------------
-async def handle_video_upload(
-    update: Update, context: ContextTypes.DEFAULT_TYPE
-):
-  if update.message and (update.message.video or update.message.document):
-    # Check if this forward is meant for setting channel
-    if context.user_data.get("setting_receive_channel") or context.user_data.get(
-        "setting_send_channel"
-    ):
-      await handle_text(update, context)
-      return
-
-    msg = await update.message.reply_text(
-        "⚙️ <b>वीडियो प्रोसेस हो रही है और वॉटरमार्क हटाया जा रहा है... कृपया"
-        " प्रतीक्षा करें!</b>",
-        parse_mode="HTML",
-    )
-
-    raw_name = (
-        update.message.caption
-        or (update.message.video and update.message.video.file_name)
-        or (update.message.document and update.message.document.file_name)
-        or "Episode_Video.mp4"
-    )
-
-    input_file = None
-    output_file = None
-    clean_file_id = None
-
-    try:
-      target_obj = update.message.video or update.message.document
-      tg_file = await context.bot.get_file(target_obj.file_id)
-      input_file = f"temp_{target_obj.file_id[:10]}.mp4"
-      output_file = f"clean_{target_obj.file_id[:10]}.mp4"
-
-      await tg_file.download_to_drive(input_file)
-
-      loop = asyncio.get_running_loop()
-      await loop.run_in_executor(
-          None, remove_watermark_ffmpeg, input_file, output_file
-      )
-
-      sent_clean = await context.bot.send_video(
-          chat_id=update.effective_chat.id,
-          video=open(output_file, "rb"),
-          caption=f"✅ <b>Clean (Watermark Removed):</b> {raw_name}",
-          parse_mode="HTML",
-      )
-      clean_file_id = sent_clean.video.file_id
-
-    except Exception as e:
-      print(f"⚠️ [Delogo Fallback]: {e}")
-      clean_file_id = target_obj.file_id
-
-    finally:
-      if input_file and os.path.exists(input_file):
-        os.remove(input_file)
-      if output_file and os.path.exists(output_file):
-        os.remove(output_file)
-
-    if "pending_videos" not in context.user_data:
-      context.user_data["pending_videos"] = []
-
-    context.user_data["pending_videos"].append({
-        "id": clean_file_id,
-        "raw_name": raw_name,
-    })
-    context.user_data["awaiting_upload_date"] = True
-
-    total_rec = len(context.user_data["pending_videos"])
-    await msg.edit_text(
-        f"🎥 <b>क्लीन वीडियो सेव हो गई! (कुल: {total_rec})</b>\n\n"
-        "✍️ <b>कृपया तारीख लिखकर भेजें (जैसे: 01 August 2026):</b>",
-        parse_mode="HTML",
-    )
-
-
-async def save_manual_show_to_db(
-    context, show_name, show_key, ott_tag, target_date, vid_list
-):
-  shows_col.update_one(
-      {"key": show_key},
-      {"$set": {"key": show_key, "name": show_name, "ott": ott_tag}},
-      upsert=True,
-  )
-
-  doc = find_db_doc_by_date(target_date)
-  existing_shows = doc.get("shows", {}) if doc else {}
-
-  if show_key not in existing_shows:
-    existing_shows[show_key] = []
-
-  for new_v in vid_list:
-    new_ep, new_q = extract_ep_and_quality(new_v["raw_name"])
-    replaced = False
-
-    for i, old_v in enumerate(existing_shows[show_key]):
-      old_ep, old_q = extract_ep_and_quality(old_v["raw_name"])
-      if old_ep == new_ep and old_q == new_q:
-        existing_shows[show_key][i] = new_v
-        replaced = True
-        break
-
-    if not replaced:
-      existing_shows[show_key].append(new_v)
-
-  if not doc:
-    video_col.insert_one({"date": target_date.lower(), "shows": existing_shows})
-  else:
-    video_col.update_one(
-        {"_id": doc["_id"]}, {"$set": {"shows": existing_shows}}
-    )
-
-  display_ott = ott_tag.split("_")[0].upper()
-  return (
-      f"✅ <b>नया शो सफ़लतापूर्वक ऐडेड!</b>\n\n"
-      f"🎬 <b>Show Name:</b> {show_name}\n"
-      f"📺 <b>OTT:</b> {display_ott}\n"
-      f"📁 <b>Total Files Saved:</b> {len(existing_shows[show_key])} Videos (All"
-      " Quality)\n"
-      f"📅 <b>Date:</b> {target_date.title()}\n\n"
-      "🎉 <b>अब ये सभी वीडियोस इस एक शो के बटन में खुलेंगी!</b>"
-  )
 
 
 # ----------------- MESSAGE & FORWARD HANDLER -----------------
@@ -602,11 +646,53 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
   msg = update.message
   text = (msg.text or "").strip()
 
-  # 1. SET SOURCE CHANNEL VIA ONE FORWARDED MESSAGE OR USERNAME
+  # 1. MISSING DATE HANDLER
+  if context.user_data.get("awaiting_missing_date"):
+    target_date = text.lower().strip()
+    context.user_data["awaiting_missing_date"] = False
+    missing_list = context.user_data.get("missing_date_vids", [])
+    context.user_data["missing_date_vids"] = []
+
+    for item in missing_list:
+      auto_save_file_to_db(item["id"], item["raw_name"], target_date)
+
+    await msg.reply_text(
+        f"✅ <b>तारीख सेट हो गई:</b> <b>{target_date.title()}</b>\n📁"
+        f" कुल <b>{len(missing_list)} वीडियोस</b> डेटाबेस में सेव कर दी गई हैं!",
+        parse_mode="HTML",
+    )
+    return
+
+  # 2. BATCH FORWARD RECEIVER
+  if context.user_data.get("awaiting_batch_forward"):
+    if msg.forward_from_chat and msg.forward_from_message_id:
+      source_chat_id = msg.forward_from_chat.id
+      start_id = msg.forward_from_message_id
+      settings = get_bot_settings()
+      target_id = settings.get("target_channel_id")
+
+      if not target_id:
+        await msg.reply_text(
+            "❌ <b>कृपया पहले 'Target Channel' सेट करें!</b>", parse_mode="HTML"
+        )
+        return
+
+      context.user_data["awaiting_batch_forward"] = False
+      asyncio.create_task(
+          process_batch_from_id(
+              source_chat_id,
+              start_id,
+              target_id,
+              update.effective_chat.id,
+              context,
+          )
+      )
+      return
+
+  # 3. SET SOURCE CHANNEL
   if context.user_data.get("setting_receive_channel"):
     ch_id = None
     ch_title = None
-
     if msg.forward_from_chat:
       ch_id = msg.forward_from_chat.id
       ch_title = (
@@ -623,20 +709,17 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
       update_bot_setting("source_channel_name", ch_title)
       context.user_data["setting_receive_channel"] = False
       await msg.reply_text(
-          f"🎯 <b>Source Channel सेट हो गया:</b> <code>{ch_title}</code>\n"
-          f"🆔 <b>Channel ID:</b> <code>{ch_id}</code>\n\n"
-          "⚡️ <b>अब इस चैनल पर जब भी कोई नई वीडियो अपलोड होगी, बॉट उसे ऑटोमैटिक"
-          " रिसीव करेगा!</b>",
+          f"🎯 <b>Source Channel सेट हो गया:</b> <code>{ch_title}</code>\n🆔"
+          f" <b>Channel ID:</b> <code>{ch_id}</code>",
           reply_markup=get_main_menu_keyboard(),
           parse_mode="HTML",
       )
       return
 
-  # 2. SET TARGET CHANNEL VIA ONE FORWARDED MESSAGE OR USERNAME
+  # 4. SET TARGET CHANNEL
   if context.user_data.get("setting_send_channel"):
     target_id = None
     target_title = None
-
     if msg.forward_from_chat:
       target_id = msg.forward_from_chat.id
       target_title = (
@@ -655,33 +738,14 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
       update_bot_setting("target_channel_name", target_title)
       context.user_data["setting_send_channel"] = False
       await msg.reply_text(
-          f"🎯 <b>Target Channel सेट हो गया:</b> <code>{target_title}</code>\n"
-          f"🆔 <b>Target ID:</b> <code>{target_id}</code>\n\n"
-          "⚡️ <b>अब बॉट वॉटरमार्क हटाने के बाद क्लीन वीडियो सीधे इस चैनल/बॉट"
-          " पर सेंड करेगा!</b>",
+          f"🎯 <b>Target Channel सेट हो गया:</b> <code>{target_title}</code>\n🆔"
+          f" <b>Target ID:</b> <code>{target_id}</code>",
           reply_markup=get_main_menu_keyboard(),
           parse_mode="HTML",
       )
       return
 
-  # 3. ADD NEW OTT NAME
-  if context.user_data.get("adding_new_ott_mode"):
-    ott_name = text.strip()
-    ott_tag = ott_name.lower().replace(" ", "") + "_p1"
-
-    ott_col.update_one(
-        {"tag": ott_tag}, {"$set": {"name": ott_name, "tag": ott_tag}}, upsert=True
-    )
-    context.user_data["adding_new_ott_mode"] = False
-    await msg.reply_text(
-        f"✅ <b>नया OTT प्लेटफ़ॉर्म सफलतापूर्वक जोड़ा गया!</b>\n\n"
-        f"📺 <b>OTT Name:</b> {ott_name}\n\n"
-        "🎉 <b>अब जब भी इस OTT का शो अपलोड होगा, यह ऑटो-शो होने लगेगा!</b>",
-        parse_mode="HTML",
-    )
-    return
-
-  # 4. ADD NEW SHOW NAME
+  # 5. ADD NEW SHOW STEP 1
   if context.user_data.get("adding_new_show_step1"):
     show_name = text.strip().title()
     show_key = show_name.lower().replace(" ", "_")
@@ -690,164 +754,28 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data["adding_new_show_step1"] = False
 
     all_otts = get_all_otts()
-    ott_buttons = []
-    for o_name, o_tag in all_otts:
-      ott_buttons.append(
-          [InlineKeyboardButton(o_name, callback_data=f"save_show_ott|{o_tag}")]
-      )
-
+    ott_buttons = [
+        [InlineKeyboardButton(o_name, callback_data=f"save_show_ott|{o_tag}")]
+        for o_name, o_tag in all_otts
+    ]
     await msg.reply_text(
-        f"🎬 <b>Show Name:</b> {show_name}\n\n"
-        "👇 <b>कृपया इस शो के लिए सही OTT सेलेक्ट करें:</b>",
+        f"🎬 <b>Show Name:</b> {show_name}\n\n👇 <b>OTT चुनें:</b>",
         reply_markup=InlineKeyboardMarkup(ott_buttons),
         parse_mode="HTML",
     )
     return
 
-  # 5. MANUAL UNMATCHED SHOW NAME
-  if context.user_data.get("adding_manual_show"):
-    show_name = text.title()
-    show_key = show_name.lower().replace(" ", "_")
-    target_date = context.user_data.get("manual_date")
-    vid_list = context.user_data.get("manual_vid_list", [])
-
-    context.user_data["adding_manual_show"] = False
-
-    auto_detected_ott = None
-    if vid_list:
-      auto_detected_ott = detect_ott_tag(vid_list[0].get("raw_name", ""))
-
-    if auto_detected_ott:
-      res_msg = await save_manual_show_to_db(
-          context,
-          show_name,
-          show_key,
-          auto_detected_ott,
-          target_date,
-          vid_list,
-      )
-      await msg.reply_text(res_msg, parse_mode="HTML")
-    else:
-      context.user_data["temp_m_show_name"] = show_name
-      context.user_data["temp_m_show_key"] = show_key
-
-      all_otts = get_all_otts()
-      ott_buttons = []
-      for o_name, o_tag in all_otts:
-        ott_buttons.append([
-            InlineKeyboardButton(
-                f"📺 {o_name}", callback_data=f"confirm_m_ott|{o_tag}"
-            )
-        ])
-
-      await msg.reply_text(
-          f"🎬 <b>Show Name:</b> {show_name}\n\n"
-          "👇 <b>कृपया इस शो के लिए OTT प्लेटफ़ॉर्म चुनें:</b>",
-          reply_markup=InlineKeyboardMarkup(ott_buttons),
-          parse_mode="HTML",
-      )
-    return
-
-  # 6. DATE ENTRY AFTER UPLOAD
-  if context.user_data.get("awaiting_upload_date"):
-    target_date = text.lower().strip()
-    context.user_data["awaiting_upload_date"] = False
-
-    pending = context.user_data.get("pending_videos", [])
-    context.user_data["pending_videos"] = []
-
-    auto_saved = 0
-    replaced_count = 0
-    unmatched_list = []
-
-    doc = find_db_doc_by_date(target_date)
-    existing_shows = doc.get("shows", {}) if doc else {}
-
-    for vid in pending:
-      matched_key = match_show(vid["raw_name"])
-      if not matched_key:
-        unmatched_list.append(vid)
-        continue
-
-      if matched_key not in existing_shows:
-        existing_shows[matched_key] = []
-
-      new_ep, new_q = extract_ep_and_quality(vid["raw_name"])
-      is_replaced = False
-
-      for idx, old_vid in enumerate(existing_shows[matched_key]):
-        old_ep, old_q = extract_ep_and_quality(old_vid["raw_name"])
-        if old_ep == new_ep and old_q == new_q:
-          existing_shows[matched_key][idx] = vid
-          replaced_count += 1
-          is_replaced = True
-          break
-
-      if not is_replaced:
-        existing_shows[matched_key].append(vid)
-
-      auto_saved += 1
-
-    if not doc:
-      video_col.insert_one({"date": target_date, "shows": existing_shows})
-    else:
-      video_col.update_one(
-          {"_id": doc["_id"]},
-          {"$set": {"date": target_date, "shows": existing_shows}},
-      )
-
-    out_msg = f"✅ <b>तारीख सेट हो गई:</b> <b>{target_date.title()}</b>\n\n"
-    out_msg += (
-        f"🤖 <b>सफलतापूर्वक प्रोसेस हुए:</b> <b>{auto_saved} वीडियोस</b>\n"
+  # 6. ADD NEW OTT NAME
+  if context.user_data.get("adding_new_ott_mode"):
+    ott_name = text.strip()
+    ott_tag = ott_name.lower().replace(" ", "") + "_p1"
+    ott_col.update_one(
+        {"tag": ott_tag}, {"$set": {"name": ott_name, "tag": ott_tag}}, upsert=True
     )
-
-    if replaced_count > 0:
-      out_msg += (
-          f"🔄 <b>सेम क्वालिटी/एपिसोड होने के कारण रिप्लेस किए गए:</b>"
-          f" <b>{replaced_count} वीडियोस</b>\n"
-      )
-
-    await msg.reply_text(out_msg, parse_mode="HTML")
-
-    if unmatched_list:
-      clean_date_tag = target_date.replace(" ", "_")
-
-      grouped_unmatched = {}
-      for u_vid in unmatched_list:
-        base_title = extract_base_title(u_vid["raw_name"])
-        if base_title not in grouped_unmatched:
-          grouped_unmatched[base_title] = []
-        grouped_unmatched[base_title].append(u_vid)
-
-      context.user_data["unmatched_groups"] = grouped_unmatched
-
-      buttons = []
-      g_idx = 0
-      unmatch_info = (
-          f"🚨 <b>कुल {len(unmatched_list)} अनमैच फाइल्स मिले हैं!</b>\n\n"
-      )
-
-      for g_title, g_vids in grouped_unmatched.items():
-        g_idx += 1
-        unmatch_info += (
-            f"🎬 <b>Show #{g_idx}: {g_title}</b> ({len(g_vids)} Files)\n"
-        )
-        buttons.append([
-            InlineKeyboardButton(
-                f"➕ Add '{g_title}' ({len(g_vids)} Files)",
-                callback_data=f"addgroup|{clean_date_tag}|{g_idx-1}",
-            )
-        ])
-
-      unmatch_info += (
-          "\n👇 <b>शो जोड़ने के लिए ऊपर दिए संबंधित बटन दबाएँ:</b>"
-      )
-
-      await msg.reply_text(
-          unmatch_info,
-          reply_markup=InlineKeyboardMarkup(buttons),
-          parse_mode="HTML",
-      )
+    context.user_data["adding_new_ott_mode"] = False
+    await msg.reply_text(
+        f"✅ <b>नया OTT जोड़ा गया:</b> {ott_name}", parse_mode="HTML"
+    )
     return
 
   # 7. USER SEARCHING DATE
@@ -867,14 +795,12 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
   ]
   if any(m in text.lower() for m in months) and re.search(r"\d+", text):
     user_input_date = text.lower().strip()
-
     user = update.effective_user
     username = (user.username or "").lower()
 
     today_dt = datetime.now()
     today_fmt1 = today_dt.strftime("%d %B %Y").lower()
     today_fmt2 = today_dt.strftime("%-d %B %Y").lower()
-
     clean_user_input = re.sub(r"^0(\d)", r"\1", user_input_date)
     clean_today = re.sub(r"^0(\d)", r"\1", today_fmt1)
 
@@ -888,19 +814,14 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
           )
       ]])
       await msg.reply_text(
-          "🚫 <b>Sorry! You cannot watch today's episode here.</b>\n"
-          "👉 <b>Please go to our Main Channel and watch today's episode from"
-          " there.</b>\n\n"
-          "🚫 <b>माफ़ कीजिए! आप आज की एपिसोड यहां नहीं देख सकते।</b>\n"
-          "👉 <b>कृपया हमारे मुख्य चैनल पर जाएं और आज की एपिसोड वहां"
-          " देखें।</b>",
+          "🚫 <b>माफ़ कीजिए! आप आज की एपिसोड यहां नहीं देख सकते।</b>\n👉"
+          " <b>कृपया हमारे मुख्य चैनल पर जाएं।</b>",
           reply_markup=channel_btn,
           parse_mode="HTML",
       )
       return
 
     context.user_data["active_date"] = user_input_date
-
     all_shows = get_all_shows()
     doc = find_db_doc_by_date(user_input_date)
     uploaded_shows_dict = doc.get("shows", {}) if doc else {}
@@ -911,10 +832,11 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         uploaded_ott_tags.add(all_shows[s_key]["ott"])
 
     all_otts = get_all_otts()
-    buttons = []
-    for o_name, o_tag in all_otts:
-      if o_tag in uploaded_ott_tags:
-        buttons.append([InlineKeyboardButton(o_name, callback_data=f"o|{o_tag}")])
+    buttons = [
+        [InlineKeyboardButton(o_name, callback_data=f"o|{o_tag}")]
+        for o_name, o_tag in all_otts
+        if o_tag in uploaded_ott_tags
+    ]
 
     if buttons:
       buttons.append([InlineKeyboardButton("❌ Close", callback_data="close")])
@@ -936,39 +858,30 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def button_click(update: Update, context: ContextTypes.DEFAULT_TYPE):
   query = update.callback_query
   await query.answer()
-
   data = query.data
 
   if data == "close":
     await query.message.delete()
     return
 
-  # TOGGLE BUTTONS HANDLERS
   elif data == "toggle_auto_receive":
     settings = get_bot_settings()
     new_val = not settings.get("auto_receive", True)
     update_bot_setting("auto_receive", new_val)
-    status_str = "🟢 ON" if new_val else "🔴 OFF"
     await query.message.edit_reply_markup(reply_markup=get_main_menu_keyboard())
-    await query.answer(f"Auto Receive set to: {status_str}", show_alert=True)
     return
 
   elif data == "toggle_auto_send":
     settings = get_bot_settings()
     new_val = not settings.get("auto_send", True)
     update_bot_setting("auto_send", new_val)
-    status_str = "🟢 ON" if new_val else "🔴 OFF"
     await query.message.edit_reply_markup(reply_markup=get_main_menu_keyboard())
-    await query.answer(f"Auto Send set to: {status_str}", show_alert=True)
     return
 
-  # ONE-TIME FORWARD TRIGGERS
   elif data == "btn_set_receive_channel":
     context.user_data["setting_receive_channel"] = True
     await query.message.reply_text(
-        "📥 <b>Source Channel सेट करें:</b>\n\n"
-        "👉 जिस चैनल से वीडियो रिसीव करनी है, उस चैनल से <b>कोई भी एक SMS या"
-        " Video Forward</b> कर दीजिए।",
+        "📥 <b>सोर्स चैनल से कोई भी एक मैसेज Forward करें:</b>",
         parse_mode="HTML",
     )
     return
@@ -976,9 +889,18 @@ async def button_click(update: Update, context: ContextTypes.DEFAULT_TYPE):
   elif data == "btn_set_send_channel":
     context.user_data["setting_send_channel"] = True
     await query.message.reply_text(
-        "📤 <b>Target Channel सेट करें:</b>\n\n"
-        "👉 जिस चैनल पर क्लीन वीडियो भेजनी है, उस चैनल से <b>कोई भी एक SMS या"
-        " Video Forward</b> कर दीजिए।",
+        "📤 <b>टारगेट चैनल से कोई भी एक मैसेज Forward करें:</b>",
+        parse_mode="HTML",
+    )
+    return
+
+  elif data == "btn_start_batch":
+    context.user_data["awaiting_batch_forward"] = True
+    await query.message.reply_text(
+        "⚡️ <b>Batch Cleaner Active!</b>\n\n👉 सोर्स चैनल से वह <b>SMS या Video"
+        " Forward करें</b> जहाँ से प्रोसेस शुरू करना चाहते हैं।\nबॉट उस मैसेज के"
+        " नीचे की <b>सभी वीडियोस</b> को वॉटरमार्क हटाकर आपके कस्टम टाइटल के साथ"
+        " टारगेट चैनल पर भेज देगा!",
         parse_mode="HTML",
     )
     return
@@ -993,8 +915,7 @@ async def button_click(update: Update, context: ContextTypes.DEFAULT_TYPE):
   elif data == "btn_add_ott":
     context.user_data["adding_new_ott_mode"] = True
     await query.message.reply_text(
-        "✍️ <b>कृपया नए OTT प्लेटफ़ॉर्म का नाम लिखकर भेजें (जैसे: ShemarooMe /"
-        " JioCinema):</b>",
+        "✍️ <b>कृपया नए OTT प्लेटफ़ॉर्म का नाम लिखकर भेजें:</b>",
         parse_mode="HTML",
     )
     return
@@ -1003,61 +924,20 @@ async def button_click(update: Update, context: ContextTypes.DEFAULT_TYPE):
     ott_tag = data.split("|")[1]
     show_name = context.user_data.get("temp_show_name")
     show_key = context.user_data.get("temp_show_key")
-
     shows_col.update_one(
         {"key": show_key},
         {"$set": {"key": show_key, "name": show_name, "ott": ott_tag}},
         upsert=True,
     )
-
     await query.message.reply_text(
-        f"✅ <b>नया शो सफलतापूर्वक डेटाबेस में जोड़ा गया!</b>\n\n"
-        f"🎬 <b>Show Name:</b> {show_name}\n"
-        f"📺 <b>OTT Tag:</b> {ott_tag.split('_')[0].upper()}\n\n"
-        "🎉 <b>अब जब भी इस नाम का शो आएगा, बॉट इसे ऑटो-मैच कर लेगा!</b>",
+        f"✅ <b>नया शो सफलतापूर्वक डेटाबेस में जोड़ा गया!</b>\n\n🎬 <b>Show"
+        f" Name:</b> {show_name}\n📺 <b>OTT Tag:</b>"
+        f" {ott_tag.split('_')[0].upper()}",
         parse_mode="HTML",
     )
     return
 
-  elif data.startswith("confirm_m_ott|"):
-    ott_tag = data.split("|")[1]
-    show_name = context.user_data.get("temp_m_show_name")
-    show_key = context.user_data.get("temp_m_show_key")
-    target_date = context.user_data.get("manual_date")
-    vid_list = context.user_data.get("manual_vid_list", [])
-
-    res_msg = await save_manual_show_to_db(
-        context, show_name, show_key, ott_tag, target_date, vid_list
-    )
-    await query.message.reply_text(res_msg, parse_mode="HTML")
-    return
-
-  elif data.startswith("addgroup|"):
-    _, clean_date_tag, group_idx_str = data.split("|")
-    target_date = clean_date_tag.replace("_", " ")
-    g_idx = int(group_idx_str)
-
-    grouped_unmatched = context.user_data.get("unmatched_groups", {})
-    titles_list = list(grouped_unmatched.keys())
-
-    if g_idx < len(titles_list):
-      selected_title = titles_list[g_idx]
-      selected_vids = grouped_unmatched[selected_title]
-
-      context.user_data["manual_vid_list"] = selected_vids
-      context.user_data["manual_date"] = target_date
-      context.user_data["adding_manual_show"] = True
-
-      await query.message.reply_text(
-          f"✍️ <b>कृपया इस शो का नाम लिखकर भेजें:</b>\n"
-          f"💡 <i>(सजेस्टेड नाम: <code>{selected_title}</code>)</i>\n\n"
-          f"<i>कुल {len(selected_vids)} फ़ाइलें इस शो में सेव होंगी।</i>",
-          parse_mode="HTML",
-      )
-    return
-
   user_date = context.user_data.get("active_date", "")
-
   if not user_date and query.message and query.message.text:
     match = re.search(
         r"Date Requested:\s*\n*([^\n]+)", query.message.text, re.IGNORECASE
@@ -1071,7 +951,6 @@ async def button_click(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
   if data.startswith("o|"):
     ott_tag = data.split("|")[1]
-
     all_shows = get_all_shows()
     doc = find_db_doc_by_date(user_date)
     uploaded_shows_dict = doc.get("shows", {}) if doc else {}
@@ -1087,16 +966,14 @@ async def button_click(update: Update, context: ContextTypes.DEFAULT_TYPE):
           ])
 
     disp_date = user_date.title() if user_date else "Selected Date"
-
     if show_buttons:
       show_buttons.append([
           InlineKeyboardButton("⬅️ Choose OTT", callback_data="b_ott"),
           InlineKeyboardButton("❌ Close", callback_data="close"),
       ])
       await query.message.edit_text(
-          f"🎬 <b>{ott_tag.split('_')[0].upper()} Shows</b>\n\n"
-          f"📅 <b>Chosen Date:</b> <b>{disp_date}</b>\n\n"
-          "🎯 <b>Available Shows Below:</b>",
+          f"🎬 <b>{ott_tag.split('_')[0].upper()} Shows</b>\n\n📅 <b>Chosen"
+          f" Date:</b> <b>{disp_date}</b>\n\n🎯 <b>Available Shows Below:</b>",
           reply_markup=InlineKeyboardMarkup(show_buttons),
           parse_mode="HTML",
       )
@@ -1112,10 +989,11 @@ async def button_click(update: Update, context: ContextTypes.DEFAULT_TYPE):
         uploaded_ott_tags.add(all_shows[s_key]["ott"])
 
     all_otts = get_all_otts()
-    buttons = []
-    for o_name, o_tag in all_otts:
-      if o_tag in uploaded_ott_tags:
-        buttons.append([InlineKeyboardButton(o_name, callback_data=f"o|{o_tag}")])
+    buttons = [
+        [InlineKeyboardButton(o_name, callback_data=f"o|{o_tag}")]
+        for o_name, o_tag in all_otts
+        if o_tag in uploaded_ott_tags
+    ]
     buttons.append([InlineKeyboardButton("❌ Close", callback_data="close")])
 
     disp_date = user_date.title() if user_date else "Selected Date"
@@ -1129,18 +1007,15 @@ async def button_click(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
   elif data.startswith("s|"):
     show_key = data.split("|")[1]
-
     doc = find_db_doc_by_date(user_date)
     date_db = doc.get("shows", {}) if doc else {}
     video_list = date_db.get(show_key, [])
 
     if video_list:
       sent_messages = []
-
       for vid_obj in video_list:
         r_name = vid_obj.get("raw_name", "Episode_Video.DKLRShowhub.mp4")
         fresh_caption = build_html_caption(r_name)
-
         sent_vid = await context.bot.send_document(
             chat_id=query.message.chat_id,
             document=vid_obj["id"],
@@ -1152,8 +1027,8 @@ async def button_click(update: Update, context: ContextTypes.DEFAULT_TYPE):
       notice_text = (
           "╭─────── ‼️ <b>Auto-Delete Notice</b> ‼️ ───────╮\n\n"
           "🚨 <b>Make sure to save the video!</b>\n"
-          "⏰ <b>Videos Will Be Auto-deleted After 60 minutes to avoid"
-          " copyright issue</b> ⌛\n"
+          "⏰ <b>Videos Will Be Auto-deleted After 60 minutes to avoid copyright"
+          " issue</b> ⌛\n"
           "📬 <b>Forward it to Saved Messages and Watch there</b>\n\n"
           "╰────────────────────────────────────╯"
       )
@@ -1177,74 +1052,105 @@ async def button_click(update: Update, context: ContextTypes.DEFAULT_TYPE):
       )
 
 
-# ----------------- BACKGROUND USERBOT RUNNER -----------------
+# ----------------- BACKGROUND USERBOT RUNNER (LIVE SYNC) -----------------
 async def start_userbot():
-  userbot = Client(
-      "dklr_integrated_userbot",
+  global pyrogram_userbot, tg_bot_app
+  if not SESSION_STRING:
+    print("⚠️ [UserBot] SESSION_STRING missing! UserBot inactive.")
+    return
+
+  pyrogram_userbot = Client(
+      "dklr_userbot",
       api_id=API_ID,
       api_hash=API_HASH,
-      in_memory=True,
+      session_string=SESSION_STRING,
   )
 
-  @userbot.on_message(filters.video | filters.document)
-  async def process_channel_video(client, message):
+  @pyrogram_userbot.on_message(filters.video | filters.document)
+  async def on_new_video(client, message):
     settings = get_bot_settings()
-
-    # 1. Auto-Receive Status Check
     if not settings.get("auto_receive", True):
       return
 
-    # 2. Source Channel ID Match
     saved_src_id = settings.get("source_channel_id")
     if not saved_src_id:
       return
 
-    current_chat_id = message.chat.id
-    current_chat_username = (message.chat.username or "").lower()
-
-    # Match ID directly or by username
-    if (str(saved_src_id) != str(current_chat_id)) and (
-        str(saved_src_id).lower() != current_chat_username
-    ):
+    if str(saved_src_id) != str(message.chat.id) and str(
+        saved_src_id
+    ).lower() != (message.chat.username or "").lower():
       return
 
     input_file = None
     output_file = None
     target_dest = settings.get("target_channel_id")
+    admin_id = settings.get("admin_chat_id")
+
+    raw_name = (
+        message.caption
+        or (message.video and message.video.file_name)
+        or (message.document and message.document.file_name)
+        or "Episode_Video.mp4"
+    )
+    msg_date = extract_date_from_text(raw_name)
 
     try:
-      print(f"📥 [UserBot] Auto-receiving new video from {message.chat.title}...")
       input_file = await message.download()
       output_file = f"clean_{os.path.basename(input_file)}"
 
-      print("⚙️ [UserBot] Removing watermark using FFmpeg...")
       loop = asyncio.get_running_loop()
       await loop.run_in_executor(
           None, remove_watermark_ffmpeg, input_file, output_file
       )
 
-      # 3. Auto-Send Status & Send Target
+      # 1. Direct Forward to Target Channel with YOUR Caption
+      clean_file_id = None
       if settings.get("auto_send", True) and target_dest:
-        print(f"📤 [UserBot] Auto-sending clean video to {target_dest}...")
-        caption = message.caption or ""
-        await client.send_document(
-            chat_id=target_dest,
-            document=output_file,
-            caption=caption,
+        custom_caption = build_html_caption(raw_name)
+        sent_m = await client.send_document(
+            chat_id=target_dest, document=output_file, caption=custom_caption
         )
-        print("✅ [UserBot] Clean video sent successfully!")
-      else:
-        print("⏸️ [UserBot] Auto-Send is OFF or Target not set.")
+        clean_file_id = (
+            sent_m.document.file_id if sent_m.document else sent_m.video.file_id
+        )
 
+      # 2. Database Sync & Admin Alerts
+      if clean_file_id:
+        if msg_date:
+          matched_key, is_saved = auto_save_file_to_db(
+              clean_file_id, raw_name, msg_date
+          )
+          if not is_saved and admin_id and tg_bot_app:
+            base_t = extract_base_title(raw_name)
+            btn = InlineKeyboardMarkup([[
+                InlineKeyboardButton(
+                    f"➕ Add '{base_t}'", callback_data="btn_add_show"
+                )
+            ]])
+            await tg_bot_app.bot.send_message(
+                chat_id=admin_id,
+                text=(
+                    f"🚨 <b>Unmatched Show Live!</b>\n🎬 <b>Title:</b>"
+                    f" {base_t}\n📁 <b>Auto Date:</b> {msg_date.title()}\n👇"
+                    " नीचे दिए बटन से इसे शो लिस्ट में जोड़ें:"
+                ),
+                reply_markup=btn,
+                parse_mode="HTML",
+            )
+        else:
+          # Date missing in live video: Ask admin for date
+          if admin_id and tg_bot_app:
+            await tg_bot_app.bot.send_message(
+                chat_id=admin_id,
+                text=(
+                    f"⚠️ <b>लाइव वीडियो में तारीख नहीं मिली!</b>\n🎬"
+                    f" <b>File:</b> {raw_name}\n\n✍️ <b>कृपया तारीख लिखकर भेजें"
+                    " (उदा: 16 August 2026):</b>"
+                ),
+                parse_mode="HTML",
+            )
     except Exception as e:
-      print(f"⚠️ [UserBot Processing Error]: {e}")
-      if settings.get("auto_send", True) and target_dest:
-        try:
-          await message.forward(target_dest)
-          print("⚠️ [UserBot] Fallback: Original forwarded.")
-        except Exception as f_err:
-          print(f"❌ [UserBot Fallback Error]: {f_err}")
-
+      print(f"⚠️ [Live Video Error]: {e}")
     finally:
       if input_file and os.path.exists(input_file):
         os.remove(input_file)
@@ -1253,20 +1159,21 @@ async def start_userbot():
 
   try:
     print("🚀 [UserBot] Starting Engine...")
-    await userbot.start()
+    await pyrogram_userbot.start()
     print("✅ [UserBot] Active & Listening!")
   except Exception as e:
-    print(f"⚠️ UserBot Exception: {e}")
+    print(f"⚠️ UserBot Error: {e}")
 
 
 def main():
+  global tg_bot_app
   loop = asyncio.new_event_loop()
   asyncio.set_event_loop(loop)
-
   loop.create_task(start_userbot())
 
-  tg_app = ApplicationBuilder().token(BOT_TOKEN).build()
-  tg_app.add_handler(CommandHandler("start", start_command))
+  tg_bot_app = ApplicationBuilder().token(BOT_TOKEN).build()
+  tg_bot_app.add_handler(CommandHandler("start", start_command))
+  tg_app = tg_bot_app
   tg_app.add_handler(
       MessageHandler(
           tg_filters.VIDEO | tg_filters.Document.VIDEO, handle_video_upload
