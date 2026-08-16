@@ -248,6 +248,74 @@ def auto_save_file_to_db(clean_file_id, raw_name, target_date):
         return matched_key, True
     return None, False
 
+# ----------------- BATCH ENGINE -----------------
+async def process_batch_from_id(chat_id, start_msg_id, target_id, reply_chat_id, context):
+    global pyrogram_userbot
+    if not pyrogram_userbot:
+        await context.bot.send_message(chat_id=reply_chat_id, text="❌ <b>UserBot एक्टिव नहीं है! SESSION_STRING चेक करें।</b>", parse_mode="HTML")
+        return
+
+    await context.bot.send_message(
+        chat_id=reply_chat_id,
+        text=f"🚀 <b>Batch Processing शुरू हो गई है!</b>\n👉 मैसेज ID <code>{start_msg_id}</code> से प्रोसेस शुरू हो रहा है...",
+        parse_mode="HTML"
+    )
+
+    processed_count = 0
+    try:
+        async for message in pyrogram_userbot.get_chat_history(chat_id):
+            if message.id < start_msg_id:
+                break
+
+            if message.video or message.document:
+                input_file = None
+                output_file = None
+                raw_name = message.caption or (message.video and message.video.file_name) or (message.document and message.document.file_name) or "Episode_Video.mp4"
+                msg_date = extract_date_from_text(raw_name)
+                needs_cleaning = has_watermark(raw_name)
+
+                try:
+                    custom_caption = build_html_caption(raw_name)
+                    clean_file_id = None
+
+                    if needs_cleaning:
+                        input_file = await message.download()
+                        output_file = f"clean_{os.path.basename(input_file)}"
+                        loop = asyncio.get_running_loop()
+                        await loop.run_in_executor(None, remove_watermark_ffmpeg, input_file, output_file)
+                        sent_msg = await pyrogram_userbot.send_document(chat_id=target_id, document=output_file, caption=custom_caption)
+                        clean_file_id = sent_msg.document.file_id if sent_msg.document else sent_msg.video.file_id
+                    else:
+                        sent_msg = await message.copy(chat_id=target_id, caption=custom_caption)
+                        clean_file_id = sent_msg.document.file_id if sent_msg.document else sent_msg.video.file_id
+
+                    processed_count += 1
+
+                    if msg_date:
+                        matched_key, is_saved = auto_save_file_to_db(clean_file_id, raw_name, msg_date)
+                        if not is_saved:
+                            base_t = extract_base_title(raw_name)
+                            btn = InlineKeyboardMarkup([[InlineKeyboardButton(f"➕ Add '{base_t}'", callback_data="btn_add_show")]])
+                            await context.bot.send_message(chat_id=reply_chat_id, text=f"🚨 <b>Unmatched Show!</b>\n🎬 <b>Title:</b> {base_t}\n📅 <b>Date:</b> {msg_date.title()}\n👇 शो जोड़ने के लिए नीचे दबाएँ:", reply_markup=btn, parse_mode="HTML")
+                    else:
+                        if "missing_date_vids" not in context.user_data:
+                            context.user_data["missing_date_vids"] = []
+                        context.user_data["missing_date_vids"].append({"id": clean_file_id, "raw_name": raw_name})
+                        context.user_data["awaiting_missing_date"] = True
+                        await context.bot.send_message(chat_id=reply_chat_id, text=f"⚠️ <b>तारीख नहीं मिली!</b>\n🎬 <b>File:</b> {raw_name}\n\n✍️ <b>कृपया तारीख लिखकर भेजें (उदा: 16 August 2026):</b>", parse_mode="HTML")
+
+                except Exception as e:
+                    print(f"⚠️ [Batch File Error]: {e}")
+                finally:
+                    if input_file and os.path.exists(input_file):
+                        os.remove(input_file)
+                    if output_file and os.path.exists(output_file):
+                        os.remove(output_file)
+
+        await context.bot.send_message(chat_id=reply_chat_id, text=f"🎉 <b>Batch Complete!</b>\n✅ कुल <b>{processed_count} वीडियोस</b> टारगेट चैनल पर भेज दी गई हैं।", parse_mode="HTML")
+    except Exception as e:
+        print(f"❌ [Batch Error]: {e}")
+
 def get_main_menu_keyboard():
     settings = get_bot_settings()
     rec_status = "🟢 Auto Receive: ON" if settings.get("auto_receive", True) else "🔴 Auto Receive: OFF"
@@ -270,8 +338,8 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         update_bot_setting("admin_chat_id", update.effective_chat.id)
         await update.message.reply_text(
             "<b>नमस्ते भाई! DKLR Show Hub Engine Live!</b>\n\n"
-            "👉 सोर्स चैनल की सभी वीडियोज वॉटरमार्क हटकर, आपका कस्टम टाइटल लगकर सीधे टारगेट चैनल पर जाएँगी।\n"
-            "👉 तारीख मिलने पर डेटाबेस में अपने आप ऐड होगी, न मिलने पर बॉट आपसे तारीख माँगेगा।\n\n"
+            "👉 सोर्स चैनल की सभी वीडियोज वॉटरमार्क हटकर सीधे टारगेट चैनल पर जाएँगी।\n"
+            "👉 तारीख मिलने पर डेटाबेस में सेव होंगी, न मिलने पर बॉट तारीख माँगेगा।\n\n"
             "👇 <b>कंट्रोल पैनल:</b>",
             reply_markup=get_main_menu_keyboard(),
             parse_mode="HTML"
@@ -293,6 +361,22 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await msg.reply_text(f"✅ <b>तारीख सेट हो गई:</b> <b>{target_date.title()}</b>\n📁 कुल <b>{len(missing_list)} वीडियोस</b> डेटाबेस में सेव कर दी गई हैं!", parse_mode="HTML")
         return
 
+    if context.user_data.get("awaiting_batch_forward"):
+        if msg.forward_from_chat and msg.forward_from_message_id:
+            source_chat_id = msg.forward_from_chat.id
+            start_id = msg.forward_from_message_id
+            settings = get_bot_settings()
+            target_id = settings.get("target_channel_id")
+            if not target_id:
+                await msg.reply_text("❌ <b>कृपया पहले 'Target Channel' सेट करें!</b>", parse_mode="HTML")
+                return
+            context.user_data["awaiting_batch_forward"] = False
+            asyncio.create_task(process_batch_from_id(source_chat_id, start_id, target_id, update.effective_chat.id, context))
+            return
+        else:
+            await msg.reply_text("⚠️ <b>कृपया सोर्स चैनल से ही कोई SMS या Video फॉरवर्ड करें!</b>", parse_mode="HTML")
+            return
+
     if context.user_data.get("setting_receive_channel"):
         ch_id = msg.forward_from_chat.id if msg.forward_from_chat else text.replace("https://t.me/", "").replace("@", "").strip()
         ch_title = msg.forward_from_chat.title if msg.forward_from_chat else str(ch_id)
@@ -312,6 +396,23 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
             context.user_data["setting_send_channel"] = False
             await msg.reply_text(f"🎯 <b>Target Channel सेट हो गया:</b> <code>{target_title}</code>\n🆔 <b>Target ID:</b> <code>{target_id}</code>", reply_markup=get_main_menu_keyboard(), parse_mode="HTML")
             return
+
+    if context.user_data.get("adding_new_show_step1"):
+        show_name = text.strip().title()
+        context.user_data["temp_show_name"] = show_name
+        context.user_data["temp_show_key"] = show_name.lower().replace(" ", "_")
+        context.user_data["adding_new_show_step1"] = False
+        ott_buttons = [[InlineKeyboardButton(o_name, callback_data=f"save_show_ott|{o_tag}")] for o_name, o_tag in get_all_otts()]
+        await msg.reply_text(f"🎬 <b>Show Name:</b> {show_name}\n\n👇 <b>OTT चुनें:</b>", reply_markup=InlineKeyboardMarkup(ott_buttons), parse_mode="HTML")
+        return
+
+    if context.user_data.get("adding_new_ott_mode"):
+        ott_name = text.strip()
+        ott_tag = ott_name.lower().replace(" ", "") + "_p1"
+        ott_col.update_one({"tag": ott_tag}, {"$set": {"name": ott_name, "tag": ott_tag}}, upsert=True)
+        context.user_data["adding_new_ott_mode"] = False
+        await msg.reply_text(f"✅ <b>नया OTT जोड़ा गया:</b> {ott_name}", parse_mode="HTML")
+        return
 
     # Date Search
     months = ["january", "february", "march", "april", "may", "june", "july", "august", "september", "october", "november", "december"]
@@ -351,6 +452,24 @@ async def button_click(update: Update, context: ContextTypes.DEFAULT_TYPE):
     elif data == "btn_set_send_channel":
         context.user_data["setting_send_channel"] = True
         await query.message.reply_text("📤 <b>टारगेट चैनल से कोई भी एक मैसेज Forward करें:</b>", parse_mode="HTML")
+    elif data == "btn_start_batch":
+        context.user_data["awaiting_batch_forward"] = True
+        await query.message.reply_text(
+            "⚡️ <b>Batch Cleaner Active!</b>\n\n👉 सोर्स चैनल से वह <b>SMS या Video Forward करें</b> जहाँ से प्रोसेस शुरू करना चाहते हैं।",
+            parse_mode="HTML"
+        )
+    elif data == "btn_add_show":
+        context.user_data["adding_new_show_step1"] = True
+        await query.message.reply_text("✍️ <b>कृपया नए शो का नाम लिखकर भेजें:</b>", parse_mode="HTML")
+    elif data == "btn_add_ott":
+        context.user_data["adding_new_ott_mode"] = True
+        await query.message.reply_text("✍️ <b>कृपया नए OTT का नाम लिखकर भेजें:</b>", parse_mode="HTML")
+    elif data.startswith("save_show_ott|"):
+        ott_tag = data.split("|")[1]
+        show_name = context.user_data.get("temp_show_name")
+        show_key = context.user_data.get("temp_show_key")
+        shows_col.update_one({"key": show_key}, {"$set": {"key": show_key, "name": show_name, "ott": ott_tag}}, upsert=True)
+        await query.message.reply_text(f"✅ <b>नया शो जोड़ा गया:</b> {show_name}", parse_mode="HTML")
 
 # ----------------- MAIN RUNNER -----------------
 async def main_async():
@@ -373,10 +492,7 @@ async def main_async():
             print("✅ [UserBot] Pyrogram Engine Active!")
         except Exception as e:
             print(f"⚠️ UserBot Start Error: {e}")
-    else:
-        print("⚠️ [SESSION_STRING] not set. Running Telegram Bot only.")
 
-    # Keep Async Loop Alive Forever
     while True:
         await asyncio.sleep(3600)
 
