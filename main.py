@@ -267,7 +267,7 @@ async def process_batch_from_id(chat_id, start_msg_id, target_id, reply_chat_id,
 
     await context.bot.send_message(
         chat_id=reply_chat_id,
-        text=f"🚀 <b>Batch Processing शुरू हो गई है!</b>\n👉 मैसेज ID <code>{start_msg_id}</code> से वीडियो डाउनलोड और प्रोसेस होना शुरू हो गया है...",
+        text=f"🚀 <b>Batch Processing शुरू हो गई है!</b>\n👉 मैसेज ID <code>{start_msg_id}</code> से वीडियो प्रोसेस हो रही हैं...",
         parse_mode="HTML"
     )
 
@@ -327,10 +327,9 @@ async def process_batch_from_id(chat_id, start_msg_id, target_id, reply_chat_id,
                 if output_file and os.path.exists(output_file):
                     os.remove(output_file)
 
-        await context.bot.send_message(chat_id=reply_chat_id, text=f"🎉 <b>Batch Complete!</b>\n✅ कुल <b>{processed_count} वीडियोस</b> सफलतापूर्वक टारगेट चैनल पर भेज दी गई हैं।", parse_mode="HTML")
+        await context.bot.send_message(chat_id=reply_chat_id, text=f"🎉 <b>Batch Complete!</b>\n✅ कुल <b>{processed_count} वीडियोस</b> टारगेट चैनल पर भेज दी गई हैं।", parse_mode="HTML")
     except Exception as e:
         print(f"❌ [Batch Error]: {e}")
-        await context.bot.send_message(chat_id=reply_chat_id, text=f"⚠️ <b>Batch Error:</b> <code>{e}</code>", parse_mode="HTML")
 
 # ----------------- KEYBOARDS -----------------
 def get_home_keyboard():
@@ -380,7 +379,7 @@ async def handle_media_or_text(update: Update, context: ContextTypes.DEFAULT_TYP
     msg = update.message
     text = (msg.text or "").strip()
 
-    # 1. ADDING NEW PACK/EPISODE TITLE (e.g., Episode 01 To 100)
+    # 1. ADDING NEW PACK NAME (e.g., Episode 01 To 100)
     if context.user_data.get("adding_pack_name"):
         pack_name = text
         story_id = context.user_data.get("active_story_id")
@@ -405,7 +404,7 @@ async def handle_media_or_text(update: Update, context: ContextTypes.DEFAULT_TYP
             file_id = target_obj.file_id
             story_id = context.user_data.get("active_story_id")
             pack_idx = context.user_data.get("active_pack_idx")
-            file_name = msg.caption or getattr(target_obj, 'file_name', None) or f"Episode File ({datetime.now().strftime('%d %b')})"
+            file_name = msg.caption or getattr(target_obj, 'file_name', None) or f"Audio File ({datetime.now().strftime('%d %b')})"
 
             doc = audio_series_col.find_one({"_id": ObjectId(story_id)})
             if doc and "packs" in doc and len(doc["packs"]) > pack_idx:
@@ -418,9 +417,9 @@ async def handle_media_or_text(update: Update, context: ContextTypes.DEFAULT_TYP
                 reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("⬅️ Back to Pack", callback_data=f"open_pack|{story_id}|{pack_idx}")]),
                 parse_mode="HTML"
             )
-            return
+ return
         else:
-            await msg.reply_text("⚠️ <b>कृपया ऑडियो, वॉइस, डॉक्युमेंट (Zip/Rar) या वीडियो फ़ाइल भेजें!</b>", parse_mode="HTML")
+            await msg.reply_text("⚠️ <b>कृपया ऑडियो, Zip, Document या वीडियो फ़ाइल भेजें!</b>", parse_mode="HTML")
             return
 
     # 3. ADDING AUDIO STORY NAME
@@ -574,7 +573,7 @@ async def button_click(update: Update, context: ContextTypes.DEFAULT_TYPE):
             parse_mode="HTML"
         )
 
-    # 2. Open Story -> Shows Packs (e.g. Ep 01 to 100)
+    # 2. Open Story -> Shows Packs / Direct Episodes & Delete Option
     elif data.startswith("open_story|"):
         story_id = data.split("|")[1]
         story = audio_series_col.find_one({"_id": ObjectId(story_id)})
@@ -583,11 +582,17 @@ async def button_click(update: Update, context: ContextTypes.DEFAULT_TYPE):
             return
 
         buttons = []
+        # Packs List
         for idx, pack in enumerate(story.get("packs", [])):
             file_count = len(pack.get("files", []))
             buttons.append([InlineKeyboardButton(f"📁 {pack['name']} ({file_count} Files)", callback_data=f"open_pack|{story_id}|{idx}")])
         
+        # Backward compatibility: Single Episodes
+        for idx, ep in enumerate(story.get("episodes", [])):
+            buttons.append([InlineKeyboardButton(f"▶️ Ep {idx+1}: {ep['title'][:25]}", callback_data=f"play_old_ep|{story_id}|{idx}")])
+
         buttons.append([InlineKeyboardButton("➕ Add Episode Pack (e.g. 01 To 100)", callback_data=f"btn_create_pack|{story_id}")])
+        buttons.append([InlineKeyboardButton("🗑 Delete this Story", callback_data=f"del_story|{story_id}")])
         buttons.append([InlineKeyboardButton("⬅️ Back", callback_data=f"audio_plat|{story['platform']}")])
 
         await query.message.edit_text(
@@ -596,6 +601,14 @@ async def button_click(update: Update, context: ContextTypes.DEFAULT_TYPE):
             reply_markup=InlineKeyboardMarkup(buttons),
             parse_mode="HTML"
         )
+
+    # Delete Story Handler
+    elif data.startswith("del_story|"):
+        story_id = data.split("|")[1]
+        story = audio_series_col.find_one({"_id": ObjectId(story_id)})
+        plat = story["platform"] if story else "pocketfm"
+        audio_series_col.delete_one({"_id": ObjectId(story_id)})
+        await query.message.edit_text(f"🗑 <b>स्टोरी डेटाबेस से हटा दी गई है!</b>", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("⬅️ Back to Stories", callback_data=f"audio_plat|{plat}")]]), parse_mode="HTML")
 
     # 3. Create New Pack Prompt
     elif data.startswith("btn_create_pack|"):
@@ -666,6 +679,32 @@ async def button_click(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 except Exception:
                     pass
 
+        asyncio.create_task(auto_delete_story_task(query.message.chat_id, [sent_msg.message_id, notice.message_id]))
+
+    # Play Old Single Ep
+    elif data.startswith("play_old_ep|"):
+        _, story_id, ep_idx_str = data.split("|")
+        story = audio_series_col.find_one({"_id": ObjectId(story_id)})
+        ep = story["episodes"][int(ep_idx_str)]
+
+        sent_msg = await context.bot.send_document(
+            chat_id=query.message.chat_id,
+            document=ep["file_id"],
+            caption=f"🎧 <b>{story['title']}</b> - {ep['title']}\n\n⚡️ <b>DKLR Show Hub</b>",
+            parse_mode="HTML"
+        )
+        notice = await context.bot.send_message(
+            chat_id=query.message.chat_id,
+            text="⏰ <b>यह ऑडियो 2 घंटे बाद ऑटो-डिलीट हो जाएगा।</b>",
+            parse_mode="HTML"
+        )
+        async def auto_delete_story_task(chat_id, msg_ids):
+            await asyncio.sleep(7200)
+            for mid in msg_ids:
+                try:
+                    await context.bot.delete_message(chat_id=chat_id, message_id=mid)
+                except Exception:
+                    pass
         asyncio.create_task(auto_delete_story_task(query.message.chat_id, [sent_msg.message_id, notice.message_id]))
 
     # Admin Add Story Name
@@ -757,7 +796,7 @@ async def button_click(update: Update, context: ContextTypes.DEFAULT_TYPE):
 # ----------------- MAIN RUNNER -----------------
 async def main_async():
     print("🚀 Starting UserBot Engine...")
-    try:
+   try:
         await userbot.start()
         print("✅ [UserBot] Pyrogram Engine Connected!")
     except Exception as e:
