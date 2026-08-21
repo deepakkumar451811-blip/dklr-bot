@@ -22,7 +22,7 @@ app_flask = Flask(__name__)
 
 @app_flask.route('/')
 def home():
-    return "DKLR Show Hub Engine Active!"
+    return "DKLR Show Hub & Audio Series Engine Active!"
 
 def run_flask():
     port = int(os.environ.get("PORT", 8080))
@@ -41,7 +41,6 @@ MONGO_URI = "mongodb+srv://deepakkumar451811_db_user:z0gBb13CSvYAECgG@cluster0.o
 API_ID = 30366893
 API_HASH = "ecb01a29588b13c36c8c373584270ea8"
 
-# आपका Session String
 SESSION_STRING = "1BVtsOIsBuy0WziD0rLnUDscaySskfhveyGx4zv0hYUqWI0RNfdIHU6eEyXFuTcszbb1xpwuec0H5-z2yAx2t2LQe6HDFqloLolKf2L5czt39pECanLIPjv2Le9tCEck2W991g_0bDk96jYZm7ZUVvQNRUo0Ka3XzMRPZyHynuwFlyTcvkYeZuREx9sDjo1vRFtA-NgX7Z5k9Mz-rg0ZVSmmXY1FbYj8ru-Gnmd_z-RxbbBfydbFFS_SVPkcJXJIkIC0HbG9QShsLGRIZazHyK25ATxnEcYjZYNW17PrLW6Ux0-2Yvx0q0WAvWKPIfGeIDwevfJuy8mvK0Wd6DpDmZEYzVJ26eUI="
 OWNER_USERNAME = "dklr145"
 
@@ -51,8 +50,8 @@ video_col = db["videos"]
 shows_col = db["custom_shows"]
 ott_col = db["custom_otts"]
 settings_col = db["bot_settings"]
+audio_series_col = db["audio_series"]
 
-# Pyrogram UserBot Instance
 userbot = Client(
     "dklr_userbot",
     api_id=API_ID,
@@ -273,7 +272,6 @@ async def process_batch_from_id(chat_id, start_msg_id, target_id, reply_chat_id,
 
     processed_count = 0
     try:
-        # Collect messages from start_msg_id onwards
         messages_to_process = []
         async for message in userbot.get_chat_history(chat_id):
             if message.id < start_msg_id:
@@ -281,7 +279,6 @@ async def process_batch_from_id(chat_id, start_msg_id, target_id, reply_chat_id,
             if message.video or message.document:
                 messages_to_process.append(message)
 
-        # Process in chronological order (oldest to newest)
         messages_to_process.reverse()
 
         for message in messages_to_process:
@@ -296,7 +293,6 @@ async def process_batch_from_id(chat_id, start_msg_id, target_id, reply_chat_id,
                 clean_file_id = None
 
                 if needs_cleaning:
-                    print(f"⚙️ [Batch] Cleaning watermark: {raw_name}")
                     input_file = await message.download()
                     output_file = f"clean_{os.path.basename(input_file)}"
                     loop = asyncio.get_running_loop()
@@ -304,7 +300,6 @@ async def process_batch_from_id(chat_id, start_msg_id, target_id, reply_chat_id,
                     sent_msg = await userbot.send_document(chat_id=target_id, document=output_file, caption=custom_caption)
                     clean_file_id = sent_msg.document.file_id if sent_msg.document else sent_msg.video.file_id
                 else:
-                    print(f"⚡️ [Batch] Direct send: {raw_name}")
                     sent_msg = await message.copy(chat_id=target_id, caption=custom_caption)
                     clean_file_id = sent_msg.document.file_id if sent_msg.document else sent_msg.video.file_id
 
@@ -336,7 +331,19 @@ async def process_batch_from_id(chat_id, start_msg_id, target_id, reply_chat_id,
         print(f"❌ [Batch Error]: {e}")
         await context.bot.send_message(chat_id=reply_chat_id, text=f"⚠️ <b>Batch Error:</b> <code>{e}</code>", parse_mode="HTML")
 
-def get_main_menu_keyboard():
+# ----------------- KEYBOARDS -----------------
+def get_home_keyboard():
+    buttons = [
+        [InlineKeyboardButton("📺 Daily TV Shows (Date Wise)", callback_data="nav_how_to_watch")],
+        [
+            InlineKeyboardButton("🎧 Pocket FM Stories", callback_data="audio_plat|pocketfm"),
+            InlineKeyboardButton("📻 Kuku FM Stories", callback_data="audio_plat|kukufm")
+        ],
+        [InlineKeyboardButton("⚙️ Admin Control Panel", callback_data="nav_admin_panel")]
+    ]
+    return InlineKeyboardMarkup(buttons)
+
+def get_admin_menu_keyboard():
     settings = get_bot_settings()
     rec_status = "🟢 Auto Receive: ON" if settings.get("auto_receive", True) else "🔴 Auto Receive: OFF"
     send_status = "🟢 Auto Send: ON" if settings.get("auto_send", True) else "🔴 Auto Send: OFF"
@@ -344,11 +351,13 @@ def get_main_menu_keyboard():
     tgt_name = settings.get("target_channel_name", "Not Set")
 
     buttons = [
-        [InlineKeyboardButton("➕ Add New Show", callback_data="btn_add_show"), InlineKeyboardButton("➕ Add New OTT", callback_data="btn_add_ott")],
+        [InlineKeyboardButton("➕ Add New TV Show", callback_data="btn_add_show"), InlineKeyboardButton("➕ Add New OTT", callback_data="btn_add_ott")],
+        [InlineKeyboardButton("➕ Add Pocket FM Story", callback_data="btn_add_audio_story|pocketfm"), InlineKeyboardButton("➕ Add Kuku FM Story", callback_data="btn_add_audio_story|kukufm")],
         [InlineKeyboardButton(rec_status, callback_data="toggle_auto_receive"), InlineKeyboardButton(send_status, callback_data="toggle_auto_send")],
         [InlineKeyboardButton(f"📥 Source: {src_name}", callback_data="btn_set_receive_channel")],
         [InlineKeyboardButton(f"📤 Target: {tgt_name}", callback_data="btn_set_send_channel")],
-        [InlineKeyboardButton("⚡️ Start Batch From Forwarded Msg", callback_data="btn_start_batch")]
+        [InlineKeyboardButton("⚡️ Start Batch Cleaner", callback_data="btn_start_batch")],
+        [InlineKeyboardButton("⬅️ Back to Main Menu", callback_data="nav_home")]
     ]
     return InlineKeyboardMarkup(buttons)
 
@@ -356,21 +365,54 @@ def get_main_menu_keyboard():
 async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.message:
         update_bot_setting("admin_chat_id", update.effective_chat.id)
-        await update.message.reply_text(
-            "<b>नमस्ते भाई! DKLR Show Hub Engine Live!</b>\n\n"
-            "👉 सोर्स चैनल की सभी वीडियोज वॉटरमार्क हटकर सीधे टारगेट चैनल पर जाएँगी।\n"
-            "👉 तारीख मिलने पर डेटाबेस में सेव होंगी, न मिलने पर बॉट तारीख माँगेगा।\n\n"
-            "👇 <b>कंट्रोल पैनल:</b>",
-            reply_markup=get_main_menu_keyboard(),
-            parse_mode="HTML"
+        welcome_text = (
+            "✨ <b>DKLR Show Hub & Audio Series Bot में आपका स्वागत है!</b> ✨\n\n"
+            "👇 <b>आप नीचे दिए गए विकल्पों में से चुन सकते हैं:</b>\n"
+            "▫️ <b>Daily TV Shows:</b> तारीख लिखकर भेजें और अपने पसंदीदा एपिसोड देखें।\n"
+            "▫️ <b>Pocket FM & Kuku FM:</b> ऑडियो स्टोरीज़ और उनके एपिसोड सुनें।"
         )
+        await update.message.reply_text(welcome_text, reply_markup=get_home_keyboard(), parse_mode="HTML")
 
-async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def handle_media_or_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not update.message:
         return
     msg = update.message
     text = (msg.text or "").strip()
 
+    # 1. ADDING NEW AUDIO EPISODE
+    if context.user_data.get("awaiting_audio_file"):
+        if msg.audio or msg.voice or msg.document or msg.video:
+            target_obj = msg.audio or msg.voice or msg.document or msg.video
+            file_id = target_obj.file_id
+            story_id = context.user_data.get("active_story_id")
+            ep_title = msg.caption or getattr(target_obj, 'file_name', None) or f"Episode {datetime.now().strftime('%H:%M')}"
+
+            audio_series_col.update_one(
+                {"_id": pymongo.collection.ObjectId(story_id)},
+                {"$push": {"episodes": {"file_id": file_id, "title": ep_title}}}
+            )
+            context.user_data["awaiting_audio_file"] = False
+            await msg.reply_text(f"✅ <b>नया एपिसोड सफलतापूर्वक जोड़ा गया!</b>\n🎙 <b>Title:</b> {ep_title}", reply_markup=get_home_keyboard(), parse_mode="HTML")
+            return
+        else:
+            await msg.reply_text("⚠️ <b>कृपया ऑडियो, वॉइस नोट या वीडियो फ़ाइल भेजें!</b>", parse_mode="HTML")
+            return
+
+    # 2. ADDING AUDIO STORY NAME
+    if context.user_data.get("adding_audio_story_name"):
+        story_name = text.title()
+        plat = context.user_data.get("audio_target_plat")
+        context.user_data["adding_audio_story_name"] = False
+        
+        audio_series_col.insert_one({
+            "platform": plat,
+            "title": story_name,
+            "episodes": []
+        })
+        await msg.reply_text(f"✅ <b>नई स्टोरी जोड़ी गई:</b> <b>{story_name}</b> ({plat.upper()})\n👇 अब आप इसमें एपिसोड जोड़ सकते हैं!", reply_markup=get_home_keyboard(), parse_mode="HTML")
+        return
+
+    # 3. MISSING DATE HANDLER
     if context.user_data.get("awaiting_missing_date"):
         target_date = text.lower().strip()
         context.user_data["awaiting_missing_date"] = False
@@ -381,6 +423,7 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await msg.reply_text(f"✅ <b>तारीख सेट हो गई:</b> <b>{target_date.title()}</b>\n📁 कुल <b>{len(missing_list)} वीडियोस</b> डेटाबेस में सेव कर दी गई हैं!", parse_mode="HTML")
         return
 
+    # 4. BATCH FORWARD RECEIVER
     if context.user_data.get("awaiting_batch_forward"):
         if msg.forward_from_chat and msg.forward_from_message_id:
             source_chat_id = msg.forward_from_chat.id
@@ -397,6 +440,7 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await msg.reply_text("⚠️ <b>कृपया सोर्स चैनल से ही कोई SMS या Video फॉरवर्ड करें!</b>", parse_mode="HTML")
             return
 
+    # 5. SET SOURCE CHANNEL
     if context.user_data.get("setting_receive_channel"):
         ch_id = msg.forward_from_chat.id if msg.forward_from_chat else text.replace("https://t.me/", "").replace("@", "").strip()
         ch_title = msg.forward_from_chat.title if msg.forward_from_chat else str(ch_id)
@@ -404,9 +448,10 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
             update_bot_setting("source_channel_id", ch_id)
             update_bot_setting("source_channel_name", ch_title)
             context.user_data["setting_receive_channel"] = False
-            await msg.reply_text(f"🎯 <b>Source Channel सेट हो गया:</b> <code>{ch_title}</code>\n🆔 <b>Channel ID:</b> <code>{ch_id}</code>", reply_markup=get_main_menu_keyboard(), parse_mode="HTML")
+            await msg.reply_text(f"🎯 <b>Source Channel सेट हो गया:</b> <code>{ch_title}</code>\n🆔 <b>Channel ID:</b> <code>{ch_id}</code>", reply_markup=get_admin_menu_keyboard(), parse_mode="HTML")
             return
 
+    # 6. SET TARGET CHANNEL
     if context.user_data.get("setting_send_channel"):
         target_id = msg.forward_from_chat.id if msg.forward_from_chat else ("@" + text.replace("https://t.me/", "").replace("@", "").strip())
         target_title = msg.forward_from_chat.title if msg.forward_from_chat else str(target_id)
@@ -414,9 +459,10 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
             update_bot_setting("target_channel_id", target_id)
             update_bot_setting("target_channel_name", target_title)
             context.user_data["setting_send_channel"] = False
-            await msg.reply_text(f"🎯 <b>Target Channel सेट हो गया:</b> <code>{target_title}</code>\n🆔 <b>Target ID:</b> <code>{target_id}</code>", reply_markup=get_main_menu_keyboard(), parse_mode="HTML")
+            await msg.reply_text(f"🎯 <b>Target Channel सेट हो गया:</b> <code>{target_title}</code>\n🆔 <b>Target ID:</b> <code>{target_id}</code>", reply_markup=get_admin_menu_keyboard(), parse_mode="HTML")
             return
 
+    # 7. ADD NEW TV SHOW
     if context.user_data.get("adding_new_show_step1"):
         show_name = text.strip().title()
         context.user_data["temp_show_name"] = show_name
@@ -426,16 +472,17 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await msg.reply_text(f"🎬 <b>Show Name:</b> {show_name}\n\n👇 <b>OTT चुनें:</b>", reply_markup=InlineKeyboardMarkup(ott_buttons), parse_mode="HTML")
         return
 
+    # 8. ADD NEW OTT
     if context.user_data.get("adding_new_ott_mode"):
         ott_name = text.strip()
         ott_tag = ott_name.lower().replace(" ", "") + "_p1"
         ott_col.update_one({"tag": ott_tag}, {"$set": {"name": ott_name, "tag": ott_tag}}, upsert=True)
         context.user_data["adding_new_ott_mode"] = False
-        await msg.reply_text(f"✅ <b>नया OTT जोड़ा गया:</b> {ott_name}", parse_mode="HTML")
+        await msg.reply_text(f"✅ <b>नया OTT जोड़ा गया:</b> {ott_name}", reply_markup=get_admin_menu_keyboard(), parse_mode="HTML")
         return
 
-    # Date Search
-    months = ["january", "february", "march", "april", "may", "june", "july", "august", "september", "october", "november", "december"]
+    # 9. DATE SEARCH (TV SHOWS)
+    months = ["january", "february", "march", "april", "may", "june", "july", "august", "september", "october", "november", "december", "jan", "feb", "mar", "apr", "jun", "jul", "aug", "sep", "oct", "nov", "dec"]
     if any(m in text.lower() for m in months) and re.search(r'\d+', text):
         user_input_date = text.lower().strip()
         context.user_data["active_date"] = user_input_date
@@ -458,14 +505,113 @@ async def button_click(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     if data == "close":
         await query.message.delete()
+    elif data == "nav_home":
+        await query.message.edit_text("✨ <b>DKLR Show Hub Main Menu:</b>", reply_markup=get_home_keyboard(), parse_mode="HTML")
+    elif data == "nav_how_to_watch":
+        await query.message.edit_text(
+            "📺 <b>Daily TV Shows कैसे देखें?</b>\n\n"
+            "👉 चैट में जिस तारीख का एपिसोड देखना है, वह तारीख लिखकर भेजें।\n"
+            "📝 <b>उदाहरण:</b> <code>16 August 2026</code> या <code>14 Aug</code>\n\n"
+            "बॉट तुरंत उस तारीख के सभी OTT और सीरियल आपके सामने ला देगा!",
+            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("⬅️ Back", callback_data="nav_home")]]),
+            parse_mode="HTML"
+        )
+    elif data == "nav_admin_panel":
+        await query.message.edit_text("⚙️ <b>Admin Control Panel:</b>", reply_markup=get_admin_menu_keyboard(), parse_mode="HTML")
+
+    # Audio Platform Stories List
+    elif data.startswith("audio_plat|"):
+        plat = data.split("|")[1]
+        plat_title = "Pocket FM" if plat == "pocketfm" else "Kuku FM"
+        stories = list(audio_series_col.find({"platform": plat}))
+        
+        buttons = []
+        for s in stories:
+            buttons.append([InlineKeyboardButton(f"🎧 {s['title']} ({len(s.get('episodes', []))} Eps)", callback_data=f"open_story|{str(s['_id'])}")])
+        
+        buttons.append([InlineKeyboardButton("➕ Add New Story", callback_data=f"btn_add_audio_story|{plat}")])
+        buttons.append([InlineKeyboardButton("⬅️ Back", callback_data="nav_home")])
+        
+        await query.message.edit_text(
+            f"🎙 <b>{plat_title} Stories List:</b>\n👇 अपनी पसंदीदा स्टोरी चुनें या नई जोड़ें:",
+            reply_markup=InlineKeyboardMarkup(buttons),
+            parse_mode="HTML"
+        )
+
+    # Open Story Episodes
+    elif data.startswith("open_story|"):
+        story_id = data.split("|")[1]
+        story = audio_series_col.find_one({"_id": pymongo.collection.ObjectId(story_id)})
+        if not story:
+            await query.message.reply_text("❌ स्टोरी नहीं मिली!")
+            return
+
+        buttons = []
+        for idx, ep in enumerate(story.get("episodes", [])):
+            buttons.append([InlineKeyboardButton(f"▶️ Ep {idx+1}: {ep['title'][:25]}", callback_data=f"play_ep|{story_id}|{idx}")])
+        
+        buttons.append([InlineKeyboardButton("➕ Add Episode", callback_data=f"btn_add_ep|{story_id}")])
+        buttons.append([InlineKeyboardButton("⬅️ Back", callback_data=f"audio_plat|{story['platform']}")])
+
+        await query.message.edit_text(
+            f"📖 <b>Story:</b> {story['title']}\n📻 <b>Platform:</b> {story['platform'].upper()}\n\n👇 <b>सुनने के लिए एपिसोड चुनें:</b>",
+            reply_markup=InlineKeyboardMarkup(buttons),
+            parse_mode="HTML"
+        )
+
+    # Play Episode with 2 Hours (7200 seconds) Auto-Delete
+    elif data.startswith("play_ep|"):
+        _, story_id, ep_idx_str = data.split("|")
+        ep_idx = int(ep_idx_str)
+        story = audio_series_col.find_one({"_id": pymongo.collection.ObjectId(story_id)})
+        ep = story["episodes"][ep_idx]
+
+        sent_msg = await context.bot.send_document(
+            chat_id=query.message.chat_id,
+            document=ep["file_id"],
+            caption=f"🎧 <b>{story['title']}</b> - <b>Ep {ep_idx+1}:</b> {ep['title']}\n\n⚡️ <b>DKLR Show Hub</b>",
+            parse_mode="HTML"
+        )
+        
+        notice = await context.bot.send_message(
+            chat_id=query.message.chat_id,
+            text="⏰ <b>यह ऑडियो कॉपीराइट सुरक्षा के लिए 2 घंटे (120 मिनट) बाद ऑटो-डिलीट हो जाएगा। इसे 'Saved Messages' में सुरक्षित कर लें!</b>",
+            parse_mode="HTML"
+        )
+
+        async def auto_delete_story_task(chat_id, msg_ids):
+            await asyncio.sleep(7200)  # 2 Hours (7200 seconds)
+            for mid in msg_ids:
+                try:
+                    await context.bot.delete_message(chat_id=chat_id, message_id=mid)
+                except Exception:
+                    pass
+
+        asyncio.create_task(auto_delete_story_task(query.message.chat_id, [sent_msg.message_id, notice.message_id]))
+
+    # Admin Add Story Name
+    elif data.startswith("btn_add_audio_story|"):
+        plat = data.split("|")[1]
+        context.user_data["adding_audio_story_name"] = True
+        context.user_data["audio_target_plat"] = plat
+        await query.message.reply_text(f"✍️ <b>कृपया {plat.upper()} की नई स्टोरी का नाम लिखकर भेजें:</b>", parse_mode="HTML")
+
+    # Admin Add Episode File
+    elif data.startswith("btn_add_ep|"):
+        story_id = data.split("|")[1]
+        context.user_data["active_story_id"] = story_id
+        context.user_data["awaiting_audio_file"] = True
+        await query.message.reply_text("🎙 <b>कृपया इस स्टोरी का ऑडियो (Audio/Voice/Video File) यहाँ भेजें:</b>", parse_mode="HTML")
+
+    # TV Show & Channel Controls
     elif data == "toggle_auto_receive":
         settings = get_bot_settings()
         update_bot_setting("auto_receive", not settings.get("auto_receive", True))
-        await query.message.edit_reply_markup(reply_markup=get_main_menu_keyboard())
+        await query.message.edit_reply_markup(reply_markup=get_admin_menu_keyboard())
     elif data == "toggle_auto_send":
         settings = get_bot_settings()
         update_bot_setting("auto_send", not settings.get("auto_send", True))
-        await query.message.edit_reply_markup(reply_markup=get_main_menu_keyboard())
+        await query.message.edit_reply_markup(reply_markup=get_admin_menu_keyboard())
     elif data == "btn_set_receive_channel":
         context.user_data["setting_receive_channel"] = True
         await query.message.reply_text("📥 <b>सोर्स चैनल से कोई भी एक मैसेज Forward करें:</b>", parse_mode="HTML")
@@ -474,13 +620,10 @@ async def button_click(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await query.message.reply_text("📤 <b>टारगेट चैनल से कोई भी एक मैसेज Forward करें:</b>", parse_mode="HTML")
     elif data == "btn_start_batch":
         context.user_data["awaiting_batch_forward"] = True
-        await query.message.reply_text(
-            "⚡️ <b>Batch Cleaner Active!</b>\n\n👉 सोर्स चैनल से वह <b>SMS या Video Forward करें</b> जहाँ से प्रोसेस शुरू करना चाहते हैं।",
-            parse_mode="HTML"
-        )
+        await query.message.reply_text("⚡️ <b>Batch Cleaner Active!</b>\n\n👉 सोर्स चैनल से वह <b>SMS या Video Forward करें</b> जहाँ से प्रोसेस शुरू करना चाहते हैं।", parse_mode="HTML")
     elif data == "btn_add_show":
         context.user_data["adding_new_show_step1"] = True
-        await query.message.reply_text("✍️ <b>कृपया नए शो का नाम लिखकर भेजें:</b>", parse_mode="HTML")
+        await query.message.reply_text("✍️ <b>कृपया नए TV शो का नाम लिखकर भेजें:</b>", parse_mode="HTML")
     elif data == "btn_add_ott":
         context.user_data["adding_new_ott_mode"] = True
         await query.message.reply_text("✍️ <b>कृपया नए OTT का नाम लिखकर भेजें:</b>", parse_mode="HTML")
@@ -489,27 +632,75 @@ async def button_click(update: Update, context: ContextTypes.DEFAULT_TYPE):
         show_name = context.user_data.get("temp_show_name")
         show_key = context.user_data.get("temp_show_key")
         shows_col.update_one({"key": show_key}, {"$set": {"key": show_key, "name": show_name, "ott": ott_tag}}, upsert=True)
-        await query.message.reply_text(f"✅ <b>नया शो जोड़ा गया:</b> {show_name}", parse_mode="HTML")
+        await query.message.reply_text(f"✅ <b>नया TV शो जोड़ा गया:</b> {show_name}", reply_markup=get_admin_menu_keyboard(), parse_mode="HTML")
+
+    # Date OTT Shows Flow
+    user_date = context.user_data.get("active_date", "")
+    if data.startswith("o|"):
+        ott_tag = data.split("|")[1]
+        all_shows = get_all_shows()
+        doc = find_db_doc_by_date(user_date)
+        uploaded_shows_dict = doc.get("shows", {}) if doc else {}
+
+        show_buttons = []
+        for key, info in all_shows.items():
+            if info["ott"] == ott_tag and key in uploaded_shows_dict and len(uploaded_shows_dict[key]) > 0:
+                show_buttons.append([InlineKeyboardButton(f"{info['name']} ↗️", callback_data=f"s|{key}")])
+
+        disp_date = user_date.title() if user_date else "Selected Date"
+        if show_buttons:
+            show_buttons.append([InlineKeyboardButton("❌ Close", callback_data="close")])
+            await query.message.edit_text(f"🎬 <b>{ott_tag.split('_')[0].upper()} Shows ({disp_date}):</b>", reply_markup=InlineKeyboardMarkup(show_buttons), parse_mode="HTML")
+
+    elif data.startswith("s|"):
+        show_key = data.split("|")[1]
+        doc = find_db_doc_by_date(user_date)
+        video_list = doc.get("shows", {}).get(show_key, []) if doc else []
+
+        if video_list:
+            sent_messages = []
+            for vid_obj in video_list:
+                r_name = vid_obj.get("raw_name", "Episode_Video.DKLRShowhub.mp4")
+                fresh_caption = build_html_caption(r_name)
+                sent_vid = await context.bot.send_document(chat_id=query.message.chat_id, document=vid_obj["id"], caption=fresh_caption, parse_mode="HTML")
+                sent_messages.append(sent_vid.message_id)
+
+            notice = await context.bot.send_message(
+                chat_id=query.message.chat_id,
+                text="⏰ <b>वीडियोज़ 60 मिनट बाद ऑटो-डिलीट हो जाएँगी! इन्हें Saved Messages में फॉरवर्ड कर लें।</b>",
+                parse_mode="HTML"
+            )
+            sent_messages.append(notice.message_id)
+
+            async def auto_delete_task(chat_id, msg_ids):
+                await asyncio.sleep(3600)
+                for mid in msg_ids:
+                    try:
+                        await context.bot.delete_message(chat_id=chat_id, message_id=mid)
+                    except Exception:
+                        pass
+
+            asyncio.create_task(auto_delete_task(query.message.chat_id, sent_messages))
 
 # ----------------- MAIN RUNNER -----------------
 async def main_async():
-    print("🚀 Starting UserBot...")
+    print("🚀 Starting UserBot Engine...")
     try:
         await userbot.start()
-        print("✅ [UserBot] Pyrogram Engine Active & Connected Successfully!")
+        print("✅ [UserBot] Pyrogram Engine Connected!")
     except Exception as e:
         print(f"⚠️ UserBot Start Error: {e}")
 
     print("🚀 Starting Telegram Bot...")
     tg_bot_app = ApplicationBuilder().token(BOT_TOKEN).build()
     tg_bot_app.add_handler(CommandHandler("start", start_command))
-    tg_bot_app.add_handler(MessageHandler((tg_filters.TEXT | tg_filters.FORWARDED) & ~tg_filters.COMMAND, handle_text))
+    tg_bot_app.add_handler(MessageHandler((tg_filters.ALL) & ~tg_filters.COMMAND, handle_media_or_text))
     tg_bot_app.add_handler(CallbackQueryHandler(button_click))
 
     await tg_bot_app.initialize()
     await tg_bot_app.start()
     await tg_bot_app.updater.start_polling()
-    print("✅ [Telegram Bot] Polling Active!")
+    print("✅ [Telegram Bot] Live & Listening!")
 
     while True:
         await asyncio.sleep(3600)
