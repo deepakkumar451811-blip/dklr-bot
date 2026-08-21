@@ -6,6 +6,7 @@ from threading import Thread
 from datetime import datetime
 from flask import Flask
 import pymongo
+from bson.objectid import ObjectId
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import (
     ApplicationBuilder,
@@ -35,7 +36,7 @@ def keep_alive():
 
 keep_alive()
 
-# ----------------- CONFIG & HARDCODED CREDENTIALS -----------------
+# ----------------- CONFIG & DB -----------------
 BOT_TOKEN = "8658926437:AAHnzF23ypbzIbZ-yATBhA0MHFGVOhVsTzA"
 MONGO_URI = "mongodb+srv://deepakkumar451811_db_user:z0gBb13CSvYAECgG@cluster0.osysn1c.mongodb.net/?appName=Cluster0"
 API_ID = 30366893
@@ -368,7 +369,7 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         welcome_text = (
             "✨ <b>DKLR Show Hub & Audio Series Bot में आपका स्वागत है!</b> ✨\n\n"
             "👇 <b>आप नीचे दिए गए विकल्पों में से चुन सकते हैं:</b>\n"
-            "▫️ <b>Daily TV Shows:</b> तारीख लिखकर भेजें और अपने पसंदीदा एपिसोड देखें।\n"
+            "▫️ <b>Daily TV Shows:</b> तारीख लिखकर भेजें और अपने पसंदीदा शो देखें।\n"
             "▫️ <b>Pocket FM & Kuku FM:</b> ऑडियो स्टोरीज़ और उनके एपिसोड सुनें।"
         )
         await update.message.reply_text(welcome_text, reply_markup=get_home_keyboard(), parse_mode="HTML")
@@ -379,40 +380,74 @@ async def handle_media_or_text(update: Update, context: ContextTypes.DEFAULT_TYP
     msg = update.message
     text = (msg.text or "").strip()
 
-    # 1. ADDING NEW AUDIO EPISODE
-    if context.user_data.get("awaiting_audio_file"):
-        if msg.audio or msg.voice or msg.document or msg.video:
-            target_obj = msg.audio or msg.voice or msg.document or msg.video
+    # 1. ADDING NEW PACK/EPISODE TITLE (e.g., Episode 01 To 100)
+    if context.user_data.get("adding_pack_name"):
+        pack_name = text
+        story_id = context.user_data.get("active_story_id")
+        context.user_data["adding_pack_name"] = False
+
+        audio_series_col.update_one(
+            {"_id": ObjectId(story_id)},
+            {"$push": {"packs": {"name": pack_name, "files": []}}}
+        )
+        await msg.reply_text(
+            f"✅ <b>नया एपिसोड पैक बना दिया गया:</b> <b>{pack_name}</b>\n\n"
+            f"👉 अब नीचे दिए बटन से अपनी स्टोरी खोलें और इसमें ऑडियो/फ़ाइलें अपलोड करें!",
+            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("📖 Open Story", callback_data=f"open_story|{story_id}")]]),
+            parse_mode="HTML"
+        )
+        return
+
+    # 2. UPLOADING AUDIO/ZIP FILE TO PACK
+    if context.user_data.get("awaiting_pack_file"):
+        target_obj = msg.audio or msg.voice or msg.document or msg.video
+        if target_obj:
             file_id = target_obj.file_id
             story_id = context.user_data.get("active_story_id")
-            ep_title = msg.caption or getattr(target_obj, 'file_name', None) or f"Episode {datetime.now().strftime('%H:%M')}"
+            pack_idx = context.user_data.get("active_pack_idx")
+            file_name = msg.caption or getattr(target_obj, 'file_name', None) or f"Episode File ({datetime.now().strftime('%d %b')})"
 
-            audio_series_col.update_one(
-                {"_id": pymongo.collection.ObjectId(story_id)},
-                {"$push": {"episodes": {"file_id": file_id, "title": ep_title}}}
+            doc = audio_series_col.find_one({"_id": ObjectId(story_id)})
+            if doc and "packs" in doc and len(doc["packs"]) > pack_idx:
+                doc["packs"][pack_idx]["files"].append({"file_id": file_id, "name": file_name})
+                audio_series_col.update_one({"_id": ObjectId(story_id)}, {"$set": {"packs": doc["packs"]}})
+
+            context.user_data["awaiting_pack_file"] = False
+            await msg.reply_text(
+                f"✅ <b>फ़ाइल पैक में अपलोड हो गई!</b>\n📁 <b>Name:</b> {file_name}",
+                reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("⬅️ Back to Pack", callback_data=f"open_pack|{story_id}|{pack_idx}")]),
+                parse_mode="HTML"
             )
-            context.user_data["awaiting_audio_file"] = False
-            await msg.reply_text(f"✅ <b>नया एपिसोड सफलतापूर्वक जोड़ा गया!</b>\n🎙 <b>Title:</b> {ep_title}", reply_markup=get_home_keyboard(), parse_mode="HTML")
             return
         else:
-            await msg.reply_text("⚠️ <b>कृपया ऑडियो, वॉइस नोट या वीडियो फ़ाइल भेजें!</b>", parse_mode="HTML")
+            await msg.reply_text("⚠️ <b>कृपया ऑडियो, वॉइस, डॉक्युमेंट (Zip/Rar) या वीडियो फ़ाइल भेजें!</b>", parse_mode="HTML")
             return
 
-    # 2. ADDING AUDIO STORY NAME
+    # 3. ADDING AUDIO STORY NAME
     if context.user_data.get("adding_audio_story_name"):
         story_name = text.title()
         plat = context.user_data.get("audio_target_plat")
         context.user_data["adding_audio_story_name"] = False
         
-        audio_series_col.insert_one({
+        inserted = audio_series_col.insert_one({
             "platform": plat,
             "title": story_name,
-            "episodes": []
+            "packs": []
         })
-        await msg.reply_text(f"✅ <b>नई स्टोरी जोड़ी गई:</b> <b>{story_name}</b> ({plat.upper()})\n👇 अब आप इसमें एपिसोड जोड़ सकते हैं!", reply_markup=get_home_keyboard(), parse_mode="HTML")
+        story_id = str(inserted.inserted_id)
+
+        await msg.reply_text(
+            f"✅ <b>नई स्टोरी जोड़ी गई:</b> <b>{story_name}</b> ({plat.upper()})\n\n"
+            f"👇 <b>अब इसमें Episode Pack (उदा: Episode 01 To 100) जोड़ने के लिए नीचे क्लिक करें:</b>",
+            reply_markup=InlineKeyboardMarkup([
+                [InlineKeyboardButton("➕ Add Episode Pack (e.g. 01 To 100)", callback_data=f"btn_create_pack|{story_id}")],
+                [InlineKeyboardButton("📖 Open Story", callback_data=f"open_story|{story_id}")]
+            ]),
+            parse_mode="HTML"
+        )
         return
 
-    # 3. MISSING DATE HANDLER
+    # 4. MISSING DATE HANDLER
     if context.user_data.get("awaiting_missing_date"):
         target_date = text.lower().strip()
         context.user_data["awaiting_missing_date"] = False
@@ -423,7 +458,7 @@ async def handle_media_or_text(update: Update, context: ContextTypes.DEFAULT_TYP
         await msg.reply_text(f"✅ <b>तारीख सेट हो गई:</b> <b>{target_date.title()}</b>\n📁 कुल <b>{len(missing_list)} वीडियोस</b> डेटाबेस में सेव कर दी गई हैं!", parse_mode="HTML")
         return
 
-    # 4. BATCH FORWARD RECEIVER
+    # 5. BATCH FORWARD RECEIVER
     if context.user_data.get("awaiting_batch_forward"):
         if msg.forward_from_chat and msg.forward_from_message_id:
             source_chat_id = msg.forward_from_chat.id
@@ -440,7 +475,7 @@ async def handle_media_or_text(update: Update, context: ContextTypes.DEFAULT_TYP
             await msg.reply_text("⚠️ <b>कृपया सोर्स चैनल से ही कोई SMS या Video फॉरवर्ड करें!</b>", parse_mode="HTML")
             return
 
-    # 5. SET SOURCE CHANNEL
+    # 6. SET SOURCE CHANNEL
     if context.user_data.get("setting_receive_channel"):
         ch_id = msg.forward_from_chat.id if msg.forward_from_chat else text.replace("https://t.me/", "").replace("@", "").strip()
         ch_title = msg.forward_from_chat.title if msg.forward_from_chat else str(ch_id)
@@ -451,7 +486,7 @@ async def handle_media_or_text(update: Update, context: ContextTypes.DEFAULT_TYP
             await msg.reply_text(f"🎯 <b>Source Channel सेट हो गया:</b> <code>{ch_title}</code>\n🆔 <b>Channel ID:</b> <code>{ch_id}</code>", reply_markup=get_admin_menu_keyboard(), parse_mode="HTML")
             return
 
-    # 6. SET TARGET CHANNEL
+    # 7. SET TARGET CHANNEL
     if context.user_data.get("setting_send_channel"):
         target_id = msg.forward_from_chat.id if msg.forward_from_chat else ("@" + text.replace("https://t.me/", "").replace("@", "").strip())
         target_title = msg.forward_from_chat.title if msg.forward_from_chat else str(target_id)
@@ -462,7 +497,7 @@ async def handle_media_or_text(update: Update, context: ContextTypes.DEFAULT_TYP
             await msg.reply_text(f"🎯 <b>Target Channel सेट हो गया:</b> <code>{target_title}</code>\n🆔 <b>Target ID:</b> <code>{target_id}</code>", reply_markup=get_admin_menu_keyboard(), parse_mode="HTML")
             return
 
-    # 7. ADD NEW TV SHOW
+    # 8. ADD NEW TV SHOW
     if context.user_data.get("adding_new_show_step1"):
         show_name = text.strip().title()
         context.user_data["temp_show_name"] = show_name
@@ -472,7 +507,7 @@ async def handle_media_or_text(update: Update, context: ContextTypes.DEFAULT_TYP
         await msg.reply_text(f"🎬 <b>Show Name:</b> {show_name}\n\n👇 <b>OTT चुनें:</b>", reply_markup=InlineKeyboardMarkup(ott_buttons), parse_mode="HTML")
         return
 
-    # 8. ADD NEW OTT
+    # 9. ADD NEW OTT
     if context.user_data.get("adding_new_ott_mode"):
         ott_name = text.strip()
         ott_tag = ott_name.lower().replace(" ", "") + "_p1"
@@ -481,7 +516,7 @@ async def handle_media_or_text(update: Update, context: ContextTypes.DEFAULT_TYP
         await msg.reply_text(f"✅ <b>नया OTT जोड़ा गया:</b> {ott_name}", reply_markup=get_admin_menu_keyboard(), parse_mode="HTML")
         return
 
-    # 9. DATE SEARCH (TV SHOWS)
+    # 10. DATE SEARCH (TV SHOWS)
     months = ["january", "february", "march", "april", "may", "june", "july", "august", "september", "october", "november", "december", "jan", "feb", "mar", "apr", "jun", "jul", "aug", "sep", "oct", "nov", "dec"]
     if any(m in text.lower() for m in months) and re.search(r'\d+', text):
         user_input_date = text.lower().strip()
@@ -519,7 +554,7 @@ async def button_click(update: Update, context: ContextTypes.DEFAULT_TYPE):
     elif data == "nav_admin_panel":
         await query.message.edit_text("⚙️ <b>Admin Control Panel:</b>", reply_markup=get_admin_menu_keyboard(), parse_mode="HTML")
 
-    # Audio Platform Stories List
+    # 1. Audio Platform Stories List
     elif data.startswith("audio_plat|"):
         plat = data.split("|")[1]
         plat_title = "Pocket FM" if plat == "pocketfm" else "Kuku FM"
@@ -527,60 +562,104 @@ async def button_click(update: Update, context: ContextTypes.DEFAULT_TYPE):
         
         buttons = []
         for s in stories:
-            buttons.append([InlineKeyboardButton(f"🎧 {s['title']} ({len(s.get('episodes', []))} Eps)", callback_data=f"open_story|{str(s['_id'])}")])
+            total_packs = len(s.get("packs", []))
+            buttons.append([InlineKeyboardButton(f"🎧 {s['title']} ({total_packs} Packs)", callback_data=f"open_story|{str(s['_id'])}")])
         
         buttons.append([InlineKeyboardButton("➕ Add New Story", callback_data=f"btn_add_audio_story|{plat}")])
         buttons.append([InlineKeyboardButton("⬅️ Back", callback_data="nav_home")])
         
         await query.message.edit_text(
-            f"🎙 <b>{plat_title} Stories List:</b>\n👇 अपनी पसंदीदा स्टोरी चुनें या नई जोड़ें:",
+            f"🎙 <b>{plat_title} Stories:</b>\n👇 अपनी पसंदीदा स्टोरी चुनें या नई स्टोरी जोड़ें:",
             reply_markup=InlineKeyboardMarkup(buttons),
             parse_mode="HTML"
         )
 
-    # Open Story Episodes
+    # 2. Open Story -> Shows Packs (e.g. Ep 01 to 100)
     elif data.startswith("open_story|"):
         story_id = data.split("|")[1]
-        story = audio_series_col.find_one({"_id": pymongo.collection.ObjectId(story_id)})
+        story = audio_series_col.find_one({"_id": ObjectId(story_id)})
         if not story:
             await query.message.reply_text("❌ स्टोरी नहीं मिली!")
             return
 
         buttons = []
-        for idx, ep in enumerate(story.get("episodes", [])):
-            buttons.append([InlineKeyboardButton(f"▶️ Ep {idx+1}: {ep['title'][:25]}", callback_data=f"play_ep|{story_id}|{idx}")])
+        for idx, pack in enumerate(story.get("packs", [])):
+            file_count = len(pack.get("files", []))
+            buttons.append([InlineKeyboardButton(f"📁 {pack['name']} ({file_count} Files)", callback_data=f"open_pack|{story_id}|{idx}")])
         
-        buttons.append([InlineKeyboardButton("➕ Add Episode", callback_data=f"btn_add_ep|{story_id}")])
+        buttons.append([InlineKeyboardButton("➕ Add Episode Pack (e.g. 01 To 100)", callback_data=f"btn_create_pack|{story_id}")])
         buttons.append([InlineKeyboardButton("⬅️ Back", callback_data=f"audio_plat|{story['platform']}")])
 
         await query.message.edit_text(
-            f"📖 <b>Story:</b> {story['title']}\n📻 <b>Platform:</b> {story['platform'].upper()}\n\n👇 <b>सुनने के लिए एपिसोड चुनें:</b>",
+            f"📖 <b>Story:</b> <b>{story['title']}</b>\n📻 <b>Platform:</b> {story['platform'].upper()}\n\n"
+            f"👇 <b>एपिसोड पैक चुनें या नया पैक जोड़ें:</b>",
             reply_markup=InlineKeyboardMarkup(buttons),
             parse_mode="HTML"
         )
 
-    # Play Episode with 2 Hours (7200 seconds) Auto-Delete
-    elif data.startswith("play_ep|"):
-        _, story_id, ep_idx_str = data.split("|")
-        ep_idx = int(ep_idx_str)
-        story = audio_series_col.find_one({"_id": pymongo.collection.ObjectId(story_id)})
-        ep = story["episodes"][ep_idx]
+    # 3. Create New Pack Prompt
+    elif data.startswith("btn_create_pack|"):
+        story_id = data.split("|")[1]
+        context.user_data["adding_pack_name"] = True
+        context.user_data["active_story_id"] = story_id
+        await query.message.reply_text(
+            "✍️ <b>कृपया एपिसोड पैक का नाम लिखकर भेजें:</b>\n\n"
+            "📝 <b>उदाहरण:</b> <code>Episode 01 To 100</code> या <code>Episode 101 To 200</code>",
+            parse_mode="HTML"
+        )
+
+    # 4. Open Pack -> Shows Files & Upload Button
+    elif data.startswith("open_pack|"):
+        _, story_id, pack_idx_str = data.split("|")
+        pack_idx = int(pack_idx_str)
+        story = audio_series_col.find_one({"_id": ObjectId(story_id)})
+        pack = story["packs"][pack_idx]
+
+        buttons = []
+        for f_idx, f_item in enumerate(pack.get("files", [])):
+            buttons.append([InlineKeyboardButton(f"▶️ Play: {f_item['name'][:25]}", callback_data=f"play_pack_file|{story_id}|{pack_idx}|{f_idx}")])
+
+        buttons.append([InlineKeyboardButton("📤 Upload File to this Pack", callback_data=f"btn_upload_to_pack|{story_id}|{pack_idx}")])
+        buttons.append([InlineKeyboardButton("⬅️ Back to Packs", callback_data=f"open_story|{story_id}")])
+
+        await query.message.edit_text(
+            f"📖 <b>Story:</b> {story['title']}\n"
+            f"📁 <b>Pack:</b> <b>{pack['name']}</b>\n\n"
+            f"👇 <b>सुनने के लिए क्लिक करें या नई फ़ाइल अपलोड करें:</b>",
+            reply_markup=InlineKeyboardMarkup(buttons),
+            parse_mode="HTML"
+        )
+
+    # 5. Upload File to Pack Prompt
+    elif data.startswith("btn_upload_to_pack|"):
+        _, story_id, pack_idx_str = data.split("|")
+        context.user_data["active_story_id"] = story_id
+        context.user_data["active_pack_idx"] = int(pack_idx_str)
+        context.user_data["awaiting_pack_file"] = True
+        await query.message.reply_text("🎙 <b>कृपया इस पैक के लिए ऑडियो, Zip, Document या वीडियो फ़ाइल यहाँ भेजें:</b>", parse_mode="HTML")
+
+    # 6. Play File from Pack with 2 Hours Auto-Delete
+    elif data.startswith("play_pack_file|"):
+        _, story_id, pack_idx_str, f_idx_str = data.split("|")
+        story = audio_series_col.find_one({"_id": ObjectId(story_id)})
+        pack = story["packs"][int(pack_idx_str)]
+        f_item = pack["files"][int(f_idx_str)]
 
         sent_msg = await context.bot.send_document(
             chat_id=query.message.chat_id,
-            document=ep["file_id"],
-            caption=f"🎧 <b>{story['title']}</b> - <b>Ep {ep_idx+1}:</b> {ep['title']}\n\n⚡️ <b>DKLR Show Hub</b>",
+            document=f_item["file_id"],
+            caption=f"🎧 <b>{story['title']}</b> - <b>{pack['name']}</b>\n📁 <b>File:</b> {f_item['name']}\n\n⚡️ <b>DKLR Show Hub</b>",
             parse_mode="HTML"
         )
         
         notice = await context.bot.send_message(
             chat_id=query.message.chat_id,
-            text="⏰ <b>यह ऑडियो कॉपीराइट सुरक्षा के लिए 2 घंटे (120 मिनट) बाद ऑटो-डिलीट हो जाएगा। इसे 'Saved Messages' में सुरक्षित कर लें!</b>",
+            text="⏰ <b>यह फ़ाइल कॉपीराइट सुरक्षा के लिए 2 घंटे (120 मिनट) बाद ऑटो-डिलीट हो जाएगी। इसे 'Saved Messages' में सुरक्षित कर लें!</b>",
             parse_mode="HTML"
         )
 
         async def auto_delete_story_task(chat_id, msg_ids):
-            await asyncio.sleep(7200)  # 2 Hours (7200 seconds)
+            await asyncio.sleep(7200)
             for mid in msg_ids:
                 try:
                     await context.bot.delete_message(chat_id=chat_id, message_id=mid)
@@ -596,14 +675,7 @@ async def button_click(update: Update, context: ContextTypes.DEFAULT_TYPE):
         context.user_data["audio_target_plat"] = plat
         await query.message.reply_text(f"✍️ <b>कृपया {plat.upper()} की नई स्टोरी का नाम लिखकर भेजें:</b>", parse_mode="HTML")
 
-    # Admin Add Episode File
-    elif data.startswith("btn_add_ep|"):
-        story_id = data.split("|")[1]
-        context.user_data["active_story_id"] = story_id
-        context.user_data["awaiting_audio_file"] = True
-        await query.message.reply_text("🎙 <b>कृपया इस स्टोरी का ऑडियो (Audio/Voice/Video File) यहाँ भेजें:</b>", parse_mode="HTML")
-
-    # TV Show & Channel Controls
+    # TV Controls
     elif data == "toggle_auto_receive":
         settings = get_bot_settings()
         update_bot_setting("auto_receive", not settings.get("auto_receive", True))
